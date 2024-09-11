@@ -13,7 +13,7 @@ fn main() {
         println!("* {header}");
     }
 
-    socket.send(Message::Text("hello websocket".into())).unwrap();
+    socket.send(Message::Binary(vec![0x10].into())).unwrap();
     
     loop {
         let msg = socket.read().expect("Error reading message");

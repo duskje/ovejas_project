@@ -5,6 +5,8 @@ use tungstenite::{
     handshake::server::{Request, Response},
 };
 
+use std::fs;
+
 fn main() {
     env_logger::init();
 
@@ -35,10 +37,15 @@ fn main() {
                                                                                 // diferencia de
                                                                                 // accept()
             loop {
-                let msg = websocket.read().unwrap();
+                let msg = websocket.read().unwrap(); // bloqueo hasta que se reciba algo
 
-                if msg.is_binary() || msg.is_text() {
-                    websocket.send(msg).unwrap();
+                if msg.is_binary() {
+                    if msg.into_data()[0] == 0x10 {
+                        println!("message code is 0x10");
+                    }
+
+                    let contents = fs::read_to_string("test.json").expect("could not open file");
+                    websocket.send(contents.into()).unwrap();
                 }
             }
         });
