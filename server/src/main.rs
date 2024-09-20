@@ -2,60 +2,58 @@ use std::net::{TcpListener, TcpStream};
 use std::thread::{spawn, sleep};
 use std::time::Duration;
 
+use figment::{Figment, providers::{Format, Yaml, Env}};
+
+use serde::Deserialize;
 use tungstenite::{
     accept_hdr,
     handshake::server::{Request, Response}, 
     WebSocket,
-    Message,
 };
 
 use serde_json::Value;
-use std::collections::HashSet;
 use std::fs;
 
-struct Delta {
-    missing_remote_keys: Vec<String>,
-    missing_local_keys: Vec<String>,
-    difference: Vec<String>,
-}
+use server::state::StateDelta;
+use shared::OpCode;
 
 fn listen(websocket: &mut WebSocket<TcpStream>) {
-    websocket.send(Message::Binary(vec![0x10].into())).expect("Could not send hello");
+    websocket.send(OpCode::RequestState.into()).expect("Could not request state");
 
-    let msg = websocket.read().unwrap(); // bloqueo hasta que se reciba algo
+    let remote_state = websocket.read().unwrap(); // bloqueo hasta que se reciba algo
 
-    if !msg.is_binary() {
+    if !remote_state.is_binary() {
         panic!("Invalid read!");
     }
 
-    let message_data = msg.into_data();
+    let message_data = remote_state.into_data();
     let remote_json: Value = serde_json::from_slice(message_data.as_slice()).expect("Could not deserialize");
 
     let local_state = fs::read("test.json").expect("Could not open local state");
     let local_json: Value = serde_json::from_slice(local_state.as_slice()).expect("Could not deserialize");
 
-    let mut delta: Vec<String> = Vec::new();
+    let state_delta = StateDelta::from_json(local_json, remote_json);
 
-    for (key, value) in local_json.as_object().unwrap() {
-        let remote_object = remote_json.as_object().unwrap();
+    println!("Missing keys local: {:?}", state_delta.not_in_local);
+    println!("Missing keys remote: {:?}", state_delta.not_in_remote);
+    println!("Keys with different values: {:?}", state_delta.value_not_equal);
 
-        if value != &remote_object[key] {
-            delta.push(key.to_string());
-        }
-    };
+    sleep(Duration::from_secs(10));
+}
 
-    let local_keys: HashSet<&String> = HashSet::from_iter(local_json.as_object().unwrap().keys());
-    let remote_keys: HashSet<&String> = HashSet::from_iter(remote_json.as_object().unwrap().keys());
-
-    println!("Missing keys local: {:?}", local_keys.difference(&remote_keys));
-    println!("Missing keys remote: {:?}", remote_keys.difference(&local_keys));
-    println!("Keys with different values: {:?}", delta);
-
-    sleep(Duration::from_secs(1));
+#[derive(Deserialize)]
+struct Config {
+    port: Option<String>,
+    address: Option<String>,
 }
 
 fn main() {
     env_logger::init();
+
+    let config: Config = Figment::new()
+        .merge(Yaml::file("config.yaml"))
+        .join(Env::raw().only(&["PORT", "ADDRESS"]))
+        .extract().unwrap();
 
     let server = TcpListener::bind("127.0.0.1:3012").unwrap();
 
@@ -78,11 +76,8 @@ fn main() {
                 Ok(response)
             };
 
-            let mut websocket = accept_hdr(stream.unwrap(), callback).unwrap(); // recibe la
-                                                                                // conexión con
-                                                                                // headers, a
-                                                                                // diferencia de
-                                                                                // accept()
+            let mut websocket = accept_hdr(stream.unwrap(), callback).unwrap();
+
             loop {
                 listen(&mut websocket);
             }
