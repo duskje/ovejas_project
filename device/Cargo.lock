@@ -61,6 +61,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -86,16 +95,6 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
-
-[[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "env_logger",
- "serde",
- "serde_json",
- "tungstenite",
-]
 
 [[package]]
 name = "colorchoice"
@@ -127,6 +126,17 @@ name = "data-encoding"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
+
+[[package]]
+name = "device"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "serde",
+ "serde_json",
+ "shared",
+ "tungstenite",
+]
 
 [[package]]
 name = "digest"
@@ -374,6 +384,14 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "tungstenite",
 ]
 
 [[package]]
