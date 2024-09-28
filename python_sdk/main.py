@@ -3,7 +3,15 @@ from typing import Any, Protocol, dataclass_transform
 import json
 
 
-def create_init(annotations: dict, defaults: dict):
+def create_init(cls: type):
+    defaults = {}
+
+    for attribute, value in cls.__dict__.items():
+       if attribute[:2] != '__':
+           defaults[attribute] = value
+
+    annotations = cls.__annotations__
+
     parameters = []
     variables = []
 
@@ -32,26 +40,14 @@ class ResourceProtocol(Protocol):
     @property
     def resource_name(self) -> str: ...
 
-
-@dataclass_transform()
-class Resource:
+class ResourceRegistry:
     _registered_resources = []
 
-    def __init__(self, cls: type):
+    def __init__(self, cls):
         if 'resource_name' not in cls.__annotations__.keys():
-            raise NotImplementedError("Class must define attribute 'resource_name'")
+            raise NotImplementedError(f"Class '{cls.__name__}' must define attribute 'resource_name'")
 
-        defaults = {}
-
-        for attribute, value in cls.__dict__.items():
-           if attribute[:2] != '__':
-               defaults[attribute] = value
-
-        annotations = cls.__annotations__
-
-        init_function = create_init(annotations, defaults)
-
-        setattr(cls, '__init__', init_function)
+        cls.__init__ = create_init(cls)
 
         self.cls = cls
 
@@ -59,14 +55,17 @@ class Resource:
         return f'{self.cls.__module__}::{self.cls.__name__}::{resource_name}'
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        object_instance: ResourceProtocol = self.cls(*args, **kwargs) # Cada recurso debe tener el atributo resource_name
+        object_instance: ResourceProtocol = self.cls(*args, **kwargs) # Each resource should have the attribute 'resource_name'
 
-        # Cada recurso instanciado debe ser único
-        if object_instance.resource_name in Resource._registered_resources:
-            raise ValueError(f"Cannot have two resources with the same 'resource_name' attribute ({object_instance.resource_name})")
+        # Check if urn is unique
+        registered_urns = (r.get('urn') for r in ResourceRegistry._registered_resources)
+        object_urn = self.get_uri(object_instance.resource_name)
+
+        if object_urn in registered_urns:
+            raise ValueError(f"Cannot have two resources with the same uri ({object_urn})")
         
-        Resource._registered_resources.append({
-            'uri': self.get_uri(object_instance.resource_name),
+        ResourceRegistry._registered_resources.append({
+            'urn': object_urn,
             'parameters': kwargs,
         })
 
@@ -79,29 +78,42 @@ class Resource:
             "resources": cls._registered_resources,
         }
 
-@Resource
+@dataclass_transform()
+def register(cls):
+    return ResourceRegistry(cls)
+    
+@register
 class User:
     resource_name: str
     uid: int
     name: str
 
-@Resource
-class Docker:
+@register
+class Docker: # TODO: change to 'Image'
     resource_name: str
     tag: str
+    environment: dict[str, str]
     restart: bool = False
+
+@register
+class Curl:
+    resource_name: str
+    method: str
+    url: str
+    response_status_code: int
+
 
 if __name__ == '__main__':
     puerco_user = User('puerco_user', name='Hiver', uid=512)
 
-    print(puerco_user.uid)
+    print(puerco_user.uid) # Se instancia un objeto
 
     User('perro_user', name='Akira', uid=256)
 
-    Docker('no_me_la_container', tag='0.1.0')
+    Docker('no_me_la_container', tag='0.1.0', environment={'USER_UID': str(puerco_user.uid)})
 
     for i in range(8):
         User(f'user_{i}', name=str(i), uid=i)
 
-    print(json.dumps(Resource.get_all(), indent=2))
+    print(json.dumps(ResourceRegistry.get_all(), indent=2))
 
