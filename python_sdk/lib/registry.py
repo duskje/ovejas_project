@@ -1,9 +1,10 @@
 from dataclasses import Field
-from typing import Any, Protocol, TypeVar, cast, dataclass_transform
+from typing import Any, Protocol, TypeVar, cast, dataclass_transform, Union
 
 import json
 import os
 
+from lib.results import Result
 
 def create_init(cls: type):
     defaults = {}
@@ -11,10 +12,14 @@ def create_init(cls: type):
     ignored_attributes = []
 
     for attribute, value in cls.__dict__.items():
+        if isinstance(value, Result):
+            ignored_attributes.append(attribute)
+            continue
+
         if attribute[:2] == '__': # Filter dunder methods
             continue
 
-        if isinstance(value, Field): # Ignore field attribute
+        if attribute == '_set_dependents':
             ignored_attributes.append(attribute)
             continue
 
@@ -26,6 +31,9 @@ def create_init(cls: type):
     variables = []
 
     for variable_name, variable_type in annotations.items():
+        if isinstance(variable_type, Result):
+            continue
+
         if variable_name in ignored_attributes:
             continue
 
@@ -49,9 +57,13 @@ def create_init(cls: type):
 
     return function
 
-class ResourceProtocol(Protocol):
-    @property
-    def resource_name(self) -> str: ...
+
+class Resource:
+    def __init__(self):
+        self.resource_name = ''
+
+    def _set_dependents(self):
+        pass
 
 
 class ResourceRegistry:
@@ -70,7 +82,8 @@ class ResourceRegistry:
         return f'{self.cls.__module__}::{self.cls.__name__}::{resource_name}'
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        object_instance: ResourceProtocol = self.cls(*args, **kwargs) # Each resource should have the attribute 'resource_name'
+        object_instance: Resource = self.cls(*args, **kwargs) # Each resource should have the attribute 'resource_name'
+        object_instance._set_dependents()
 
         # Check if urn is unique
         registered_urns = (r.get('urn') for r in ResourceRegistry._registered_resources)
