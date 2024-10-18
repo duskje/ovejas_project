@@ -1,10 +1,12 @@
-from dataclasses import Field
-from typing import Any, Protocol, TypeVar, cast, dataclass_transform, Union
+from collections.abc import Mapping
+from dataclasses import Field, asdict, is_dataclass
+from typing import Any, Optional, Protocol, TypeVar, TypedDict, cast, dataclass_transform, Union
 
 import json
 import os
+import weakref
 
-from lib.results import Result
+from lib.results import Resolvable, Result, TypeOrResult
 
 def create_init(cls: type):
     defaults = {}
@@ -58,16 +60,22 @@ def create_init(cls: type):
     return function
 
 
-class Resource:
-    def __init__(self):
-        self.resource_name = ''
+class Resource(Protocol):
+    resource_name: str
 
-    def _set_dependents(self):
-        pass
+    @property
+    def urn(self):
+        return f'{type(self).__module__}::{type(self).__name__}::{self.resource_name}'
 
+
+class RegisteredResource(TypedDict):
+    urn: str
+    parameters: Mapping[str, Any]
+    results: Mapping[str, Any]
 
 class ResourceRegistry:
-    _registered_resources = []
+    _registered_resources: list[RegisteredResource] = []
+    _dependency_graph = {}
     command = os.environ.get('__command')
 
     def __init__(self, cls):
@@ -83,24 +91,52 @@ class ResourceRegistry:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         object_instance: Resource = self.cls(*args, **kwargs) # Each resource should have the attribute 'resource_name'
-        object_instance._set_dependents()
 
         # Check if urn is unique
         registered_urns = (r.get('urn') for r in ResourceRegistry._registered_resources)
         object_urn = self.get_uri(object_instance.resource_name)
 
+        resolvables = {}
+
+        for attribute_key in object_instance.__dir__():
+             attribute_value = getattr(object_instance, attribute_key)
+
+             if isinstance(attribute_value, Result):
+                 # attribute_value.set_dependent(weakref.ref(object_instance))
+                 attribute_value.set_dependent(object_instance)
+                 attribute_value.set_attribute_tag(attribute_key)
+
+                 resolvables[attribute_key] = attribute_value
+
         if object_urn in registered_urns:
             raise ValueError(f"Cannot have two resources with the same uri ({object_urn})")
-        
+
         ResourceRegistry._registered_resources.append({
             'urn': object_urn,
             'parameters': kwargs,
+            'results': resolvables,
         })
 
         return object_instance
 
+    @staticmethod
+    def resolve_dependency_graph():
+        for resource in ResourceRegistry._registered_resources:
+             resource_urn = resource['urn']
+             pass
+
     @classmethod
     def as_json(cls):
+        registered_resources = cls._registered_resources
+
+        resolved_results = {}
+
+        for registered_resource in registered_resources:
+            for unsolved_result_key, unsolved_result_value in registered_resource['results'].items():
+                resolved_results[unsolved_result_key] = asdict(unsolved_result_value.resolve())
+
+            registered_resource['results'] = resolved_results
+
         return json.dumps({
             "version": 1,
             "command": cls.command,

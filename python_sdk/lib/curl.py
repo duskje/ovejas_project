@@ -1,11 +1,11 @@
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import subprocess
 from typing import Protocol, Any, cast
 from dataclasses import dataclass
 
-from lib.registry import register, Resource
-from lib.results import Result, resolve, Resolvable
+from lib.registry import ResourceRegistry, register, Resource
+from lib.results import Result, resolvable, Resolvable, TypeOrResult
 
-import weakref
 
 @dataclass
 class CurlResponse(Resolvable):
@@ -24,14 +24,37 @@ class CurlResponse(Resolvable):
 class Curl(Resource):
     resource_name: str
     method: str
-    url: Result[str] | str
+    url: TypeOrResult[str]
 
-    response: Result[CurlResponse] = resolve(CurlResponse)
+    response: Result[CurlResponse] = resolvable(CurlResponse)
 
-    def _set_dependents(self):
-        self.response.set_dependent(weakref.ref(self))
 
 if __name__ == '__main__':
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     req = Curl('req', 'GET', 'https://www.google.com/')
 
-    print(req.response)
+    print(req.urn)
+    print(req.response.resolve())
+    print(req.response.urn)
+
+    def get_request(i: int):
+        resource_name = f'req_{i}'
+
+        req = Curl(resource_name, 'GET', 'https://www.google.com/')
+        print(resource_name, "will sleep for", i, "seconds")
+        time.sleep(i)
+        print(req.response.dependent)
+        print(resource_name, req.response.resolve())
+
+    with ThreadPoolExecutor() as executor:
+        futures = []
+        seconds = 5
+        for i in range(seconds):
+            futures.append(executor.submit(get_request, seconds - i))
+
+        for future in as_completed(futures):
+            future.result()
+
+    print(ResourceRegistry.as_json())
