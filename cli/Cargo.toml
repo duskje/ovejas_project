@@ -1,0 +1,9 @@
+[package]
+name = "ovejas"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.20", features = ["derive", "cargo"] }
+# pyo3 = { version = "0.22.5", features = ["extension-module"]}
+pyo3 = "0.22.5"

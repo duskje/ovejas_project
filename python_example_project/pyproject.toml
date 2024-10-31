@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "python-example-project"
+version = "0.1.0"
+description = ""
+authors = ["David Oscanoa <duskje@protonmail.com>"]
+license = "MPL"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+ovejas = {path = "../python_sdk"}
+
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

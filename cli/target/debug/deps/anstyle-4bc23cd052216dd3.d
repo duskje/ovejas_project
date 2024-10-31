@@ -1,0 +1,12 @@
+/home/duskje/Projects/ovejas_project/cli/target/debug/deps/libanstyle-4bc23cd052216dd3.rmeta: /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/lib.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/macros.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/color.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/effect.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/reset.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/style.rs
+
+/home/duskje/Projects/ovejas_project/cli/target/debug/deps/libanstyle-4bc23cd052216dd3.rlib: /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/lib.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/macros.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/color.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/effect.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/reset.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/style.rs
+
+/home/duskje/Projects/ovejas_project/cli/target/debug/deps/anstyle-4bc23cd052216dd3.d: /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/lib.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/macros.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/color.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/effect.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/reset.rs /home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/style.rs
+
+/home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/lib.rs:
+/home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/macros.rs:
+/home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/color.rs:
+/home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/effect.rs:
+/home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/reset.rs:
+/home/duskje/.cargo/registry/src/index.crates.io-6f17d22bba15001f/anstyle-1.0.9/src/style.rs:
