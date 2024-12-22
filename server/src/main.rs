@@ -17,6 +17,7 @@ use std::fs;
 use server::state::StateDelta;
 use shared::{Operation, Transaction};
 
+
 fn listen(websocket: &mut WebSocket<TcpStream>, current_state: &mut Operation) {
     match current_state {
         Operation::RequestState => {
