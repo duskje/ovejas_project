@@ -1,0 +1,12 @@
+{
+    "resources": [
+        {
+          "urn": "ovejas.system::User::user_0",
+          "parameters": {
+            "name": "user0",
+            "uid": 111,
+            "gid": 111
+          }
+        }
+    ]
+}
