@@ -1,4 +1,6 @@
-use tungstenite::Message;
+use tokio_tungstenite::tungstenite::Message;
+use serde_json::{Result, Value};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
@@ -8,64 +10,51 @@ pub enum Transaction {
 }
 
 #[derive(Debug)]
-pub enum Operation { // TODO: rename to operation
+pub enum RequestOperations {
     RequestState,
-    ExecuteTransaction(Transaction),
 }
 
-impl From<Message> for Operation {
-    fn from(orig: Message) -> Self {
-        let data = orig.into_data();
-        let op_code = data.clone()[0];
+impl From<Message> for RequestOperations {
+ fn from(orig: Message) -> Self {
+     let data = orig.into_data();
+     let op_code = data.clone()[0];
 
-        return match op_code {
-            0x1 => Operation::RequestState,
-            0x2 => {
-                let transaction_opcode = data.clone()[1];
-                let key = bincode::deserialize(&data.clone()[2..]).unwrap();
+     match op_code {
+         0x1 => RequestOperations::RequestState,
+         _ => panic!("Unknown opcode {op_code}"),
+     }
+ }
+}
 
-                let transaction = match transaction_opcode {
-                    0x0 => Transaction::Add(key),
-                    0x1 => Transaction::Update(key),
-                    0x2 => Transaction::Delete(key),
-                    _ => panic!("Unknown transaction_opcode {transaction_opcode}"),
-                };
+impl From<RequestOperations> for Message {
+    fn from(orig: RequestOperations) -> Self {
+        let op_code: Vec<u8> = match orig {
+            RequestOperations::RequestState => vec![0x1],
+        };
 
-                Operation::ExecuteTransaction(transaction)
-            },
-            _ => panic!("Unknown opcode {op_code}"),
-        }
+        Message::Binary(op_code.into())
     }
 }
 
-impl From<Operation> for Message {
-    fn from(orig: Operation) -> Self {
-        let op_code_value: Vec<u8> = match orig {
-            Operation::RequestState => vec![0x1],
-            Operation::ExecuteTransaction(transaction) => {
-                let (transaction_opcode, key): (u8, String) = match transaction {
-                    Transaction::Add(key) => {
-                        (0x0, key)
-                    },
-                    Transaction::Update(key) => {
-                        (0x1, key)
-                    },
-                    Transaction::Delete(key) => {
-                        (0x2, key)
-                    },
-                };
+#[derive(Serialize, Deserialize, Debug)]
+pub enum StateAction {
+    Up,
+    Down,
+    Preview,
+}
 
-                let mut encoded_key: Vec<u8> = bincode::serialize(&key).unwrap();
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StateOperationMessage {
+    pub environment: String,
+    pub action: StateAction,
+    pub state: Option<String>,
+}
 
-                let mut op_code = vec![0x2];
+impl From<StateOperationMessage> for Message {
+    fn from(orig: StateOperationMessage) -> Self {
+        let serialized_state_op = serde_json::to_string(&orig)
+            .expect("Could not convert to string");
 
-                op_code.push(transaction_opcode);
-                op_code.append(&mut encoded_key);
-
-                op_code
-            },
-        };
-
-        Message::Binary(op_code_value.into())
+        Message::Text(serialized_state_op.into())
     }
 }

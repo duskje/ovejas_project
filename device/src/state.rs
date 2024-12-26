@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::Value;
 
 #[derive(Debug)]
+#[derive(PartialEq)]
 pub struct StateDelta {
     pub resources_to_delete: Vec<Value>,
     pub resources_to_create: Vec<Value>,
