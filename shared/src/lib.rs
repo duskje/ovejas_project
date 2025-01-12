@@ -12,6 +12,8 @@ pub enum Transaction {
 #[derive(Debug)]
 pub enum RequestOperations {
     RequestState,
+    UpdateState(String),
+    DestroyState,
 }
 
 impl From<Message> for RequestOperations {
@@ -21,6 +23,11 @@ impl From<Message> for RequestOperations {
 
      match op_code {
          0x1 => RequestOperations::RequestState,
+         0x2 => {
+             let state_payload = String::from_utf8(data.clone()[1..].into()).expect("Could not parse state payload");
+             RequestOperations::UpdateState(state_payload)
+         },
+         0x3 => RequestOperations::DestroyState,
          _ => panic!("Unknown opcode {op_code}"),
      }
  }
@@ -28,11 +35,17 @@ impl From<Message> for RequestOperations {
 
 impl From<RequestOperations> for Message {
     fn from(orig: RequestOperations) -> Self {
-        let op_code: Vec<u8> = match orig {
+        let data: Vec<u8> = match orig {
             RequestOperations::RequestState => vec![0x1],
+            RequestOperations::UpdateState(state_payload) => {
+                let mut data = vec![0x2];
+                data.append(&mut state_payload.into_bytes());
+                data
+            },
+            RequestOperations::DestroyState => vec![0x3],
         };
 
-        Message::Binary(op_code.into())
+        Message::Binary(data.into())
     }
 }
 
@@ -48,6 +61,7 @@ pub struct StateOperationMessage {
     pub environment: String,
     pub action: StateAction,
     pub state: Option<String>,
+    pub project: String,
 }
 
 impl From<StateOperationMessage> for Message {
