@@ -1,41 +1,71 @@
-use tokio_tungstenite::tungstenite::Message;
+use std::collections::HashMap;
 
-#[derive(Debug)]
-pub enum RequestOperations {
-    RequestState,
-    UpdateState(String),
-    DestroyState,
+use chrono::NaiveDateTime;
+use tokio_tungstenite::tungstenite::Message;
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum EnvironmentUpdateOperation {
+    Create,
+    Update,
+    Destroy,
 }
 
-impl From<Message> for RequestOperations {
- fn from(orig: Message) -> Self {
-     let data = orig.into_data();
-     let op_code = data.clone()[0];
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EnvironmentUpdate {
+    pub state: Option<String>,
+    pub operation: EnvironmentUpdateOperation,
+}
 
-     match op_code {
-         0x1 => RequestOperations::RequestState,
-         0x2 => {
-             let state_payload = String::from_utf8(data.clone()[1..].into()).expect("Could not parse state payload");
-             RequestOperations::UpdateState(state_payload)
-         },
-         0x3 => RequestOperations::DestroyState,
-         _ => panic!("Unknown opcode {op_code}"),
-     }
- }
+#[derive(Serialize, Deserialize, Debug)]
+pub enum RequestOperations {
+    StatusRequest,
+    UpdateEnvironmentsRequest(HashMap<String, EnvironmentUpdate>),
 }
 
 impl From<RequestOperations> for Message {
     fn from(orig: RequestOperations) -> Self {
-        let data: Vec<u8> = match orig {
-            RequestOperations::RequestState => vec![0x1],
-            RequestOperations::UpdateState(state_payload) => {
-                let mut data = vec![0x2];
-                data.append(&mut state_payload.into_bytes());
-                data
-            },
-            RequestOperations::DestroyState => vec![0x3],
-        };
+        let serialized = bincode::serialize(&orig).expect("Could not serialize");
+        Message::Binary(serialized.into())
+    }
+}
 
-        Message::Binary(data.into())
+impl From<Message> for RequestOperations {
+    fn from(orig: Message) -> Self {
+        let data = orig.into_data();
+        let deserialized: RequestOperations = bincode::deserialize(data.as_ref()).expect("Could not deserialize");
+
+        deserialized
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum DeviceStatus {
+    Idle,
+    InProgress,
+    Ready,
+    // RolledBack,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CurrentStatusResponse {
+    pub status: DeviceStatus,
+    pub timestamp: String,
+    pub state_hashes: HashMap<String, [u8; 16]>,
+}
+
+impl From<CurrentStatusResponse> for Message {
+    fn from(orig: CurrentStatusResponse) -> Self {
+        let serialized = bincode::serialize(&orig).expect("Could not serialize");
+        Message::Binary(serialized.into())
+    }
+}
+
+impl From<Message> for CurrentStatusResponse {
+    fn from(orig: Message) -> Self {
+        let data = orig.into_data();
+        let deserialized: CurrentStatusResponse = bincode::deserialize(data.as_ref()).expect("Could not deserialize");
+
+        deserialized
     }
 }
