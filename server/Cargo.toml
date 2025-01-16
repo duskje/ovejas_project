@@ -13,3 +13,8 @@ tungstenite = "0.24.0"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26.1"
 futures = "0.3.31"
+md-5 = "0.10.6"
+diesel = { version = "2.2.0", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "chrono"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+deadpool-diesel = { version = "0.6.1", features = ["sqlite"] }
+chrono = "0.4.39"
