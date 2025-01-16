@@ -1,0 +1,9 @@
+DROP TABLE states;
+
+CREATE TABLE states (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    json VARCHAR NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    device_id INTEGER,
+    FOREIGN KEY(device_id) REFERENCES devices(id)
+);
