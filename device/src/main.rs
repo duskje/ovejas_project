@@ -1,15 +1,14 @@
+use std::collections::HashMap;
 use std::{fs, net::TcpStream};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use device::state::StateDelta;
 use http::Request;
+use md5::{Md5, Digest};
 use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
 
-use shared::RequestOperations;
-use std::fs::File;
-use std::io::prelude::*;
-use std::env;
-use std::io;
+use shared::request_operations::{CurrentStatusResponse, DeviceStatus, RequestOperations};
 
-fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>){
+fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
     let msg = socket.read().expect("Error reading message");
 
     if !msg.is_binary() {
@@ -19,13 +18,33 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>){
     let op_code: RequestOperations = msg.into();
 
     match op_code {
-        RequestOperations::RequestState => {
-            println!("Server requested current state.");
+        RequestOperations::StatusRequest => {
+            println!("Remote requested current state");
 
-            let contents = fs::read_to_string("local_state.json").expect("could not open file");
-            socket.send(Message::Binary(contents.into())).expect("Could not send state to remote");
+            let local_state = fs::read_to_string("local_state.json").expect("Could not open local state");
+
+            let mut hasher = Md5::new();
+            hasher.update(local_state);
+            let state_hash: [u8; 16] = hasher.finalize().into();
+
+            let mut state_hashes = HashMap::new();
+
+            state_hashes.insert("development".to_string(), state_hash);
+
+            let current_status = CurrentStatusResponse {
+                status: DeviceStatus::Idle,
+                timestamp: Utc::now().naive_utc().to_string(),
+                state_hashes,
+            };
+
+            socket.send(current_status.into())
+                .expect("Could not send device status to remote");
         },
-    }
+        RequestOperations::UpdateEnvironmentsRequest(environment_updates) => {
+            
+            println!("Remote sent state {environment_updates:?}");
+        },
+    };
 }
 
 use std::process::Command;
@@ -111,7 +130,7 @@ impl Resource {
             "User" => serde_json::from_value::<User>(self.parameters.clone())?,
             _ => panic!["resource does not exist"],
         };
-
+        
         if !dry_run {
             match action {
                 Action::Create => resource.create(),
@@ -123,8 +142,6 @@ impl Resource {
         Ok(())
     }
 }
-
-
 
 //fn main() -> Result<()> {
 //    // let target_state = r#"
@@ -172,16 +189,22 @@ impl Resource {
 //    Ok(())
 //}
 //
+//
+//
+//
+
 fn main() {
     env_logger::init();
 
     let request = Request::builder()
         .uri("ws://localhost:9734/socket")
         .header("sec-websocket-key", "foo")
-        .header("machine-type", "device")
         .header("upgrade", "websocket")
         .header("host", "example.com")
         .header("connection", "upgrade")
+        .header("machine-type", "device")
+        .header("machine-id", "device_test_name")
+        .header("authorization", "device_token")
         .header("sec-websocket-version", 13)
         .body(())
         .unwrap();
