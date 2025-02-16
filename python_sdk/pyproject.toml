@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ovejas"
-version = "0.1.0"
+version = "0.2.1"
 description = ""
 authors = ["David Oscanoa <duskje@protonmail.com>"]
 license = "MIT"

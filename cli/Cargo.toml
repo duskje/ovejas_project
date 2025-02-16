@@ -6,9 +6,12 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.20", features = ["derive", "cargo"] }
 http = "1.2.0"
+figment = { version = "0.10.19", features = ["yaml", "env"]}
 # pyo3 = { version = "0.22.5", features = ["extension-module"]}
 shared = { version = "0.1.0", path = "../shared" }
 pyo3 = "0.22.5"
 tungstenite = "0.26.1"
 serde = "1.0.217"
 toml = "0.8.19"
+diesel = { version = "2.2.0", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "chrono"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }

@@ -36,6 +36,7 @@ def execute(main_path: str, lib_path: str):
         '__name__': '__main__',
     }
 
+    exec("import ovejas; ovejas._EXECUTION_CONTEXT = 'CLI_TOOL';")
     exec(program, executor_context)
 
     resource_class = executor_context['ResourceRegistry']

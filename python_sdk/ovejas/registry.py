@@ -6,7 +6,12 @@ import json
 import os
 import weakref
 
+from ovejas import _EXECUTION_CONTEXT
+
 from .results import Resolvable, Result, TypeOrResult
+
+if _EXECUTION_CONTEXT is None:
+    raise RuntimeError("This project needs to be executed with the CLI tool")
 
 def create_init(cls: type):
     defaults = {}
