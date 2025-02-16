@@ -18,7 +18,7 @@ poetry install
 Proyecto que envía los estados objetivo desde la herramienta de línea de comandos a los agentes.
 
 ### Requisitos
-    - [Diesel CLI](https://diesel.rs/guides/getting-started.html#installing-diesel-cli)
+* [Diesel CLI](https://diesel.rs/guides/getting-started.html#installing-diesel-cli)
 
 ### Instalación
 En el directorio `server/` es necesario ejecutar:
@@ -30,9 +30,9 @@ cargo build
 
 ### Variables de entorno
 El servidor recibe las siguientes variables de entorno:
-    - `DATABASE_URL`: URL de la base de datos SQLite (Obligatoria)
-    - `PORT`: Puerto del servidor (Opcional; 9734 por defecto)
-    - `ADDRESS`: Dirección del servidor (Opcional; 127.0.0.1 por defecto)
+* `DATABASE_URL`: URL de la base de datos SQLite (Obligatoria)
+* `PORT`: Puerto del servidor (Opcional; 9734 por defecto)
+* `ADDRESS`: Dirección del servidor (Opcional; 127.0.0.1 por defecto)
 
 Las variables de entorno se pueden pasar mediante un archivo `.env` o mediante un archivo `config.yaml` en el directorio desde que se ejecute el servidor.
 
