@@ -2,11 +2,35 @@ use std::collections::HashMap;
 use std::{fs, net::TcpStream};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use device::state::StateDelta;
+use figment::{Figment, providers::{Format, Yaml, Env}};
 use http::Request;
 use md5::{Md5, Digest};
 use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
 
-use shared::request_operations::{CurrentStatusResponse, DeviceStatus, RequestOperations};
+use shared::request_operations::{CurrentStatusResponse, DeviceStatus, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
+
+#[derive(Deserialize, Serialize, Debug)]
+struct ResourceSchema {
+    urn: String,
+    parameters: HashMap<String, String>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct StateSchema {
+    schema_version: i32,
+    resources: Vec<ResourceSchema>,
+}
+
+fn process_environment_update_request(environment: String, environment_update: EnvironmentUpdate) {
+    match environment_update.operation {
+        EnvironmentUpdateOperation::Create => {
+        },
+        EnvironmentUpdateOperation::Destroy => {
+        },
+        EnvironmentUpdateOperation::Update =>  {
+        }
+    }
+}
 
 fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
     let msg = socket.read().expect("Error reading message");
@@ -21,7 +45,8 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
         RequestOperations::StatusRequest => {
             println!("Remote requested current state");
 
-            let local_state = fs::read_to_string("local_state.json").expect("Could not open local state");
+            let local_state = fs::read_to_string("local_state.json")
+                .expect("Could not open local state");
 
             let mut hasher = Md5::new();
             hasher.update(local_state);
@@ -41,8 +66,18 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
                 .expect("Could not send device status to remote");
         },
         RequestOperations::UpdateEnvironmentsRequest(environment_updates) => {
-            
-            println!("Remote sent state {environment_updates:?}");
+            for (environment, environment_update) in environment_updates {
+                println!(
+                    "Remote sent state {:?} -> {:?}",
+                    environment.clone(),
+                    environment_update.clone(),
+                );
+
+                process_environment_update_request(
+                    environment,
+                    environment_update,
+                );
+            }
         },
     };
 }
@@ -109,12 +144,6 @@ impl ResourceActions for User {
     }
 }
 
-// #[derive(Serialize, Deserialize, Debug)]
-// struct Resource<T> {
-//     urn: String,
-//     parameters: T,
-// }
-
 #[derive(Serialize, Deserialize, Debug)]
 struct Resource {
     urn: String,
@@ -122,9 +151,10 @@ struct Resource {
 }
 
 impl Resource {
-    fn apply(&self, action: Action, dry_run: bool) -> Result<()> {
+    fn get_resource(&self, action: Action, dry_run: bool) -> Result<()> {
         let urn_split: Vec<&str> = self.urn.split("::").collect();
-        let [module, kind, name] = urn_split.try_into().expect("Invalid urn");
+        let [module, kind, resource_id] = urn_split.try_into()
+            .expect("Invalid urn");
 
         let resource = match kind {
             "User" => serde_json::from_value::<User>(self.parameters.clone())?,
@@ -192,15 +222,31 @@ impl Resource {
 //
 //
 //
+//
+//
+#[derive(Deserialize)]
+struct Config {
+    port: Option<String>,
+    address: Option<String>,
+    database_path: Option<String>,
+}
 
 fn main() {
-    env_logger::init();
+    let config: Config = Figment::new()
+        .merge(Yaml::file("config.yaml"))
+        .join(Env::raw().only(&["PORT", "ADDRESS", "DATABASE_PATH"]))
+        .extract().unwrap();
+
+    let address = config.address.unwrap_or("localhost".into());
+    let port = config.port.unwrap_or("9734".into());
+
+    let full_address = format!("{address}:{port}");
 
     let request = Request::builder()
-        .uri("ws://localhost:9734/socket")
+        .uri(format!("ws://{full_address}/socket"))
         .header("sec-websocket-key", "foo")
         .header("upgrade", "websocket")
-        .header("host", "example.com")
+        .header("host", address)
         .header("connection", "upgrade")
         .header("machine-type", "device")
         .header("machine-id", "device_test_name")
@@ -209,7 +255,8 @@ fn main() {
         .body(())
         .unwrap();
 
-    let (mut websocket, response) = connect(request).expect("Could not connect to the server");
+    let (mut websocket, response) = connect(request)
+        .expect("Could not connect to the server");
 
     println!("Connected successfully to the server!");
     println!("HTTP status code: {}", response.status());

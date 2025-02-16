@@ -4,14 +4,14 @@ use chrono::NaiveDateTime;
 use tokio_tungstenite::tungstenite::Message;
 use serde::{Serialize, Deserialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum EnvironmentUpdateOperation {
     Create,
     Update,
     Destroy,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EnvironmentUpdate {
     pub state: Option<String>,
     pub operation: EnvironmentUpdateOperation,
