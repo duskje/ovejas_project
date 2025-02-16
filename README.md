@@ -5,7 +5,7 @@ Proyecto para la memoria de título de Ingeniería Civil Electrónica. Este repo
 Proyecto de ejemplo para ser usado con la herramienta de línea de comandos.
 
 ### Requisitos
-    - [Poetry](https://python-poetry.org/docs/#installation)
+* [Poetry](https://python-poetry.org/docs/#installation)
 
 ### Instalación
 En el directorio `python_example_project/` es necesario ejecutar:
