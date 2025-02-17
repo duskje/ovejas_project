@@ -41,22 +41,6 @@ fn init_conn() -> (WebSocket<MaybeTlsStream<TcpStream>>, Response) {
 
     println!("Connected successfully to remote");
 
-    // let (websocket, response) = connect(request).expect("Could not connect to the server");
-
-//     println!("Connected successfully to the server!");
-//     println!("HTTP status code: {}", response.status());
-//     println!("Response headers:");
-// 
-//     for (header, _value) in response.headers() {
-//         println!("* {header}");
-//     }
-//
-//    match response.status() {
-//        StatusCode::SWITCHING_PROTOCOLS => 
-//        StatusCode::FORBIDDEN  => panic!("Authentication error"),
-//        _ => unimplemented!("Status code not covered"),
-//    }
-
     return (websocket, response);
 }
 
