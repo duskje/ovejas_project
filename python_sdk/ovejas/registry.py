@@ -119,12 +119,10 @@ class ResourceRegistry:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         object_instance: Resource = self.cls(*args, **kwargs) # Each resource should have the attribute 'resource_name'
 
-        # Check if urn is unique
         registered_urns = (r.get('urn') for r in ResourceRegistry._registered_resources)
-#        object_urn = self.get_uri(object_instance.resource_name)
 
         if object_instance.urn in registered_urns:
-            raise ValueError(f"Cannot have two resources with the same uri ({object_urn})")
+            raise ValueError(f"Cannot have two resources with the same uri ({object_instance.urn})")
 
         resolvables, depends_on  = self.inject_dependents_into_resolvables(object_instance)
 
