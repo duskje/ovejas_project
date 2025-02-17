@@ -1,32 +1,44 @@
-from typing import Any
+from typing import Any, Optional
 import sys
 import os
 
-def hide_output(f):
-    def wrapper(*args, **kwargs):
-        stderr_tmp = sys.stderr
-        stdout_tmp = sys.stdout
+debug = os.environ['OVEJAS_EXECUTOR_DEBUG']
+debug = debug == 'true' if debug is not None else False
 
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
+def hide_output(debug_mode_enabled: bool):
+    if not debug_mode_enabled:
+        def decorator(function):
+            def wrapper(*args, **kwargs):
+                stderr_tmp = sys.stderr
+                stdout_tmp = sys.stdout
 
-        try:
-            result = f(*args, **kwargs)
-        except:
-            sys.stderr = stderr_tmp
-            sys.stdout = stdout_tmp
+                sys.stdout = open(os.devnull, 'w')
+                sys.stderr = open(os.devnull, 'w')
 
-            raise
+                try:
+                    result = function(*args, **kwargs)
+                except:
+                    sys.stderr = stderr_tmp
+                    sys.stdout = stdout_tmp
 
-        sys.stderr = stderr_tmp
-        sys.stdout = stdout_tmp
+                    raise
 
-        return result
+                sys.stderr = stderr_tmp
+                sys.stdout = stdout_tmp
 
-    return wrapper
+                return result
 
+            return wrapper
+    else:
+        def decorator(function):
+            def wrapper(*args, **kwargs):
+                return function(*args, **kwargs)
 
-@hide_output
+            return wrapper
+
+    return decorator
+
+@hide_output(debug_mode_enabled=debug)
 def execute(main_path: str, lib_path: str):
     sys.path.append(lib_path)
 
@@ -44,11 +56,12 @@ def execute(main_path: str, lib_path: str):
     return resource_class.as_json()
 
 if __name__ == '__main__':
-#    execute(command='up',
-#            main_path='main.py',
-#            lib_path='.')
+    import os
 
-    result = execute(main_path='/home/duskje/Projects/ovejas_project/python_example_project/main.py',
-                     lib_path='/home/duskje/Projects/ovejas_project/python_example_project/')
+    main_path = ''
+    source_root = ''
+
+    result = execute(main_path='/home/david/Projects/ovejas_project/python_example_project/main.py',
+                     lib_path='/home/david/Projects/ovejas_project/python_example_project/')
 
     print(result)
