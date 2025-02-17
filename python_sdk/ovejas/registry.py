@@ -135,21 +135,10 @@ class ResourceRegistry:
             'results': resolvables,
         })
 
-        #object_instance.urn = object_urn
-
         return object_instance
-
-    @staticmethod
-    def resolve_dependency_graph():
-        resources_by_urn = {}
-
-        for resource in ResourceRegistry._registered_resources:
-             resource_urn = resource['urn']
 
     @classmethod
     def as_json(cls):
-        cls.resolve_dependency_graph()
-
         registered_resources = cls._registered_resources
 
         dependency_graph: Mapping[Urn, list[Urn]] = {}
