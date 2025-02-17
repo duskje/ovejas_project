@@ -5,6 +5,7 @@ from typing import Any, NotRequired, Optional, Protocol, TypeVar, TypedDict, cas
 import json
 import os
 import weakref
+import datetime
 
 from ovejas import _EXECUTION_CONTEXT
 
@@ -23,7 +24,8 @@ def create_init(cls: type):
             ignored_attributes.append(attribute)
             continue
 
-        if attribute[:2] == '__': # Filter dunder methods
+        # Filter dunder methods
+        if attribute[:2] == '__':
             continue
 
         if attribute == '_set_dependents':
@@ -66,10 +68,16 @@ def create_init(cls: type):
 
     return function
 
+type SchemaVersion = str;
+type ResourceNamespace = str;
 
+class NamespaceMetadata(TypedDict):
+    schema: SchemaVersion
+    namespace: ResourceNamespace
+    
 class Resource(Protocol):
     resource_name: str
-#    urn: str
+    namespace_metadata: NamespaceMetadata
 
     @property
     def urn(self):
@@ -117,7 +125,7 @@ class ResourceRegistry:
         return resolvables, depends_on
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        object_instance: Resource = self.cls(*args, **kwargs) # Each resource should have the attribute 'resource_name'
+        object_instance: Resource = self.cls(*args, **kwargs)
 
         registered_urns = (r.get('urn') for r in ResourceRegistry._registered_resources)
 
@@ -181,13 +189,25 @@ class ResourceRegistry:
 
         return json.dumps({
             "version": 1,
+            "created_at": str(datetime.datetime.now()),
             "resources": cls._registered_resources,
         }, indent=2)
 
-T = TypeVar('T')
 
+T = TypeVar('T')
 
 @dataclass_transform(frozen_default=True)
 def register(cls: type[T]) -> type[T]:
     return cast(type[T], ResourceRegistry(cls))
 
+
+def provider_namespace(metadata: NamespaceMetadata):
+    @dataclass_transform(frozen_default=True)
+    def register(cls: type[T]) -> type[T]:
+        resource = cast(type[T], ResourceRegistry(cls))
+
+        setattr(resource, 'namespace_metadata', metadata)
+
+        return resource
+
+    return register
