@@ -24,8 +24,10 @@ Proyecto que envía los estados objetivo desde la herramienta de línea de coman
 En el directorio `server/` es necesario ejecutar:
 
 ```bash
-diesel generate run
+export DATABASE_URL='<nombre de la base de datos>.db' # Base de datos de sqlite
+diesel database --setup migrations
 cargo build
+cargo run
 ```
 
 ### Variables de entorno
@@ -40,7 +42,7 @@ Las variables de entorno se pueden pasar mediante un archivo `.env` o mediante u
 Herramienta por interfaz de línea de comandos para levantar o bajar la infraestructura definida en un proyecto de Python.
 
 ### Requisitos
-Ninguno.
+- Python 3.12 (recomendado usar pyenv)
 
 ### Instalación
 En el directorio `cli/` es necesario ejecutar:
