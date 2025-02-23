@@ -20,7 +20,7 @@ use figment::{Figment, providers::{Format, Yaml, Env}};
 
 use serde::Deserialize;
 use tungstenite::{
-    accept_hdr, handshake::server::Response, http::StatusCode, WebSocket
+    accept, accept_hdr, handshake::server::Response, http::StatusCode, WebSocket
 };
 
 use serde_json::Value;
@@ -161,7 +161,7 @@ async fn listen_device(
                 println!("{device:?}");
 
                 if device.is_none() {
-                    panic!("Device not found")
+                    panic!("Device not found in database, rejecting connection")
                 }
 
                 let environments: Vec<Environments> = DevicesEnvironments::belonging_to(&device.unwrap())
@@ -266,15 +266,31 @@ use server::schema::*;
 struct ListenerSession {
     machine_id: String,
     listener_type: ListenerType,
-    authenticated: bool,
+    bearer_token: String,
     ws_stream: WebSocketStream<TcpStream>,
+}
+
+async fn is_device_registered(machine_id: String, database_pool: Pool) -> bool { 
+    let conn = database_pool.get().await.expect("Could not get database connection");
+
+    let is_device_none = conn.interact(move |conn| {
+        let device = devices::table
+            .filter(devices::name.eq(machine_id.clone()))
+            .select(Devices::as_select())
+            .get_result(conn)
+            .optional()
+            .expect("Database error");
+
+        return device.is_none();
+    }).await.expect("Could not fetch device from database");
+
+    return !is_device_none
 }
 
 async fn new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSession {
     let mut listener_type = ListenerType::Error;
-    let mut authenticated = false;
-    let mut authorized = false;
     let mut machine_id: String = String::default();
+    let mut bearer_token: String = String::default();
 
     let callback = |req: &Request, mut response: Response| {
         println!("request path: {}", req.uri().path());
@@ -282,21 +298,6 @@ async fn new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSessio
         for (header, value) in req.headers() {
             println!("* {header}: {value:?}");
         }
-
-        let headers = response.headers_mut();
-
-        let machine_type = req.headers()
-            .get("machine-type")
-            .expect("Client didn't set a value to header 'machine-type'")
-            .to_str()
-            .expect("Error while retrieving header 'machine-type'");
-
-        machine_id = req.headers()
-            .get("machine-id")
-            .expect("Client didn't set a value to header 'machine-id'")
-            .to_str()
-            .expect("Error while retrieving header 'machine-id'")
-            .to_string();
 
         let auth_value = req.headers()
             .get("authorization");
@@ -306,14 +307,24 @@ async fn new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSessio
             return Ok(response);
         }
 
-        let auth_value = auth_value
-            .unwrap()
+        bearer_token = auth_value
+            .expect("Client didn't set a value to header 'machine-id'")
             .to_str()
-            .expect("Error while retrieving header 'authorization'");
-        
-        // add auth here
+            .expect("Error while retrieving header 'machine-id'")
+            .to_string();
 
-        authenticated = true;
+        machine_id = req.headers()
+            .get("machine-id")
+            .expect("Client didn't set a value to header 'machine-id'")
+            .to_str()
+            .expect("Error while retrieving header 'machine-id'")
+            .to_string();
+
+        let machine_type = req.headers()
+            .get("machine-type")
+            .expect("Client didn't set a value to header 'machine-type'")
+            .to_str()
+            .expect("Error while retrieving header 'machine-type'");
 
         match machine_type {
             "device" => {
@@ -327,8 +338,6 @@ async fn new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSessio
             }
         }
 
-        authorized = true;
-
         println!("Listener type set to '{listener_type:?}'");
 
         Ok(response)
@@ -339,7 +348,7 @@ async fn new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSessio
     ListenerSession {
         machine_id,
         listener_type,
-        authenticated,
+        bearer_token,
         ws_stream,
     }
 }
@@ -347,10 +356,20 @@ async fn new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSessio
 async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr, database_pool: Pool) {
     let mut session = new_session(raw_stream, database_pool.clone()).await;
 
-    if !session.authenticated {
-        println!("Authentication error; closing connection...");
-        return;
+    let device_registered = is_device_registered(
+        session.machine_id.clone(),
+        database_pool.clone()
+    ).await;
+
+    if !device_registered {
+        println!("Device not registered; closing connection...");
+        return
     }
+
+    // if !session.authenticated {
+    //     println!("Authentication error; closing connection...");
+    //     return;
+    // }
 
     match session.listener_type {
         ListenerType::Device => {
@@ -372,8 +391,6 @@ async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr, database_poo
                 .unwrap();
 
             let state_operation_message: StateOperationMessage = serde_json::from_str(message_data.as_str()).expect("Could not deserialize");
-
-            // add authorization here
 
             println!("Command: {:?}", state_operation_message.action);
 
@@ -442,6 +459,9 @@ async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr, database_poo
                 StateAction::Preview => {
 
                 },
+                StateAction::Admin => {
+
+                },
                 _ => unimplemented!("action not implemented yet")
 
             }
@@ -452,14 +472,14 @@ async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr, database_poo
 
 use server::models::*;
 use diesel::{insert_into, prelude::*};
-use deadpool_diesel::sqlite::{Runtime, Manager, Pool};
+use deadpool_diesel::{sqlite::{Manager, Pool, Runtime}, InteractError};
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
 
     let config: Config = Figment::new()
-        .merge(Yaml::file("config.yaml"))
+        .merge(Yaml::file("config.yml"))
         .join(Env::raw().only(&["PORT", "ADDRESS", "DATABASE_URL"]))
         .extract().unwrap();
 
