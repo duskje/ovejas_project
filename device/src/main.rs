@@ -3,7 +3,7 @@ use std::{fs, net::TcpStream};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use device::state::StateDelta;
 use figment::{Figment, providers::{Format, Yaml, Env}};
-use http::Request;
+use http::{Request, Response};
 use md5::{Md5, Digest};
 use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
 
@@ -255,8 +255,11 @@ fn main() {
         .body(())
         .unwrap();
 
-    let (mut websocket, response) = connect(request)
-        .expect("Could not connect to the server");
+    let (mut websocket, response) = connect(request).inspect_err(|e: Response| -> 
+        let response_body: serde_json::Value = e.body().into();
+
+        eprintln!("reason {}", response_body["msg"])
+    ).expect("Could not connect to the server");
 
     println!("Connected successfully to the server!");
     println!("HTTP status code: {}", response.status());
