@@ -10,11 +10,7 @@ use tokio_tungstenite::{
 };
 
 use std::{
-    collections::HashMap,
-    convert::Infallible,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-    borrow::BorrowMut,
+    borrow::BorrowMut, collections::HashMap, convert::Infallible, error::Error, net::SocketAddr, sync::{Arc, Mutex}
 };
 
 use figment::{Figment, providers::{Format, Yaml, Env}};
@@ -255,7 +251,6 @@ async fn listen_device(
 enum ListenerType {
     Device,
     CLI,
-    Error,
 }
 
 use server::models::*;
@@ -412,20 +407,47 @@ fn json_response(status_code: StatusCode, msg: String, data: serde_json::Value) 
         .expect("Failed to build response");
 }
 
-fn handle_http_connection(req: &mut Request<Incoming>, database_pool: Pool) -> Response<http_body_util::Full<tokio_tungstenite::tungstenite::Bytes>> { 
-    if req.uri() == "/user" && req.method() == Method::POST {
-        return json_response(
-            StatusCode::OK,
-            String::from("Created user successfully"),
-            serde_json::Value::Null,
-        )
-    } else {
-        return json_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            String::default(),
-            serde_json::Value::Null,
-        )
-    }
+async fn handle_http_connection(req: &mut Request<Incoming>, database_pool: Pool) -> Response<http_body_util::Full<tokio_tungstenite::tungstenite::Bytes>> { 
+    let (uri, method) = (req.uri().clone().to_string(), req.method().clone());
+
+    match (uri.as_str(), method) {
+        ("/user", Method::POST) => {
+            return json_response(
+                StatusCode::OK,
+                String::from("Created user successfully"),
+                serde_json::Value::Null,
+            )
+        },
+        _ => {
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                String::default(),
+                serde_json::Value::Null,
+            )
+        }
+    };
+}
+
+#[derive(Debug)]
+pub enum ValidationError {
+    NoMachineIdSet,
+    DeviceNotRegistered,
+}
+
+async fn validate_connection(listener_type: &ListenerType, machine_id: &Option<String>, database_pool: Pool) -> Result<(), ValidationError> {
+    match listener_type {
+        ListenerType::Device => { 
+            if machine_id.is_none() { return Err(ValidationError::NoMachineIdSet); };
+
+            let machine_id = machine_id.clone().expect("Expected machine id");
+
+            if !is_device_registered(machine_id, database_pool).await { return Err(ValidationError::DeviceNotRegistered); }
+        },
+        ListenerType::CLI => {
+        },
+    } 
+
+    Ok(())
 }
 
 async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool: Pool) -> Result<Response<Body>, Infallible> {
@@ -444,10 +466,6 @@ async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool
     let key = headers.get(SEC_WEBSOCKET_KEY);
 
     let derived = key.map(|k| derive_accept_key(k.as_bytes()));
-
-    if is_http_connection(&mut req) {
-        return Ok(handle_http_connection(&mut req, database_pool));
-    }
 
     let ver = req.version();
 
@@ -473,11 +491,45 @@ async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool
                     return Some(ListenerType::CLI);
                 }
                 _ => {
-                    println!("Invalid value for 'machine-type' ({listener_type})");
                     return None;
                 }
             }
-        });
+        }).expect("Invalid value for 'machine-type' ({listener_type})") ;
+
+    let validation_result  = validate_connection(
+        &listener_type,
+        &machine_id,
+        database_pool.clone()
+    ).await;
+
+
+    match validation_result {
+        Err(ValidationError::DeviceNotRegistered) => {
+            let body = serde_json::json!({"msg": "Device not registered", "data": null}).to_string();
+
+            let mut error_response = Response::new(http_body_util::Full::from(body));
+
+            *error_response.status_mut() = StatusCode::NOT_FOUND;
+            error_response.headers_mut().append("content-type", "application/json".parse().unwrap());
+
+            return Ok(error_response);
+        },
+        Err(ValidationError::NoMachineIdSet) => {
+            let body = serde_json::json!({"msg": "No machine-id set in header", "data": null}).to_string();
+
+            let mut error_response = Response::new(http_body_util::Full::from(body));
+
+            *error_response.status_mut() = StatusCode::NOT_FOUND;
+            error_response.headers_mut().append("content-type", "application/json".parse().unwrap());
+
+            return Ok(error_response);
+        }
+        Ok(()) => {},
+    };
+
+    if is_http_connection(&mut req) {
+        return Ok(handle_http_connection(&mut req, database_pool).await);
+    }
 
     tokio::task::spawn(async move {
         match hyper::upgrade::on(&mut req).await {
@@ -486,7 +538,7 @@ async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool
 
                 handle_connection(ListenerSession {
                         machine_id: machine_id.expect("Error while retrieving header 'machine-id'"),
-                        listener_type: listener_type.expect("Error while retrieving header 'machine-type'"),
+                        listener_type: listener_type,
                         bearer_token: bearer_token.expect("Error while retrieving header 'authorization'"),
                         ws_stream: WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await,
                 }, database_pool.clone())
@@ -631,15 +683,10 @@ use server::models::*;
 use diesel::{insert_into, prelude::*};
 use deadpool_diesel::{sqlite::{Manager, Pool, Runtime}, InteractError};
 use hyper::{
-    body::Incoming,
-    header::{
+    body::Incoming, header::{
         HeaderValue, CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION,
         UPGRADE,
-    },
-    server::conn::http1,
-    service::service_fn,
-    upgrade::Upgraded,
-    Method, Request, Response, StatusCode, Version,
+    }, server::conn::http1, service::service_fn, upgrade::Upgraded, HeaderMap, Method, Request, Response, StatusCode, Version
 };
 
 use tokio_tungstenite::{
