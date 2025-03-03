@@ -231,6 +231,17 @@ struct Config {
     database_path: Option<String>,
 }
 
+#[derive(Debug)]
+struct ServerError {
+    reason_given: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServerResponse {
+    data: Option<serde_json::Value>,
+    msg: Option<String>,
+}
+
 fn main() {
     let config: Config = Figment::new()
         .merge(Yaml::file("config.yaml"))
@@ -255,11 +266,17 @@ fn main() {
         .body(())
         .unwrap();
 
-    let (mut websocket, response) = connect(request).inspect_err(|e: Response| -> 
-        let response_body: serde_json::Value = e.body().into();
+    let (mut websocket, response) = connect(request).map_err(|e: tungstenite::Error| {
+        match e {
+            tungstenite::Error::Http(response) => {
+                let response_body = response.body().clone().unwrap();
+                let response_json: ServerResponse = serde_json::from_str(String::from_utf8(response_body).unwrap().as_str()).expect("Could not parse server response");
 
-        eprintln!("reason {}", response_body["msg"])
-    ).expect("Could not connect to the server");
+                ServerError { reason_given: response_json.msg.unwrap() }
+            },
+            _ => ServerError { reason_given: String::from("No reason given") }
+        }
+    }).expect("Could not connect to the server");
 
     println!("Connected successfully to the server!");
     println!("HTTP status code: {}", response.status());
