@@ -1,4 +1,5 @@
 use futures::{future, SinkExt, StreamExt, TryStreamExt};
+use http_body_util::BodyExt;
 use md5::{Md5, Digest};
 use tokio::{
     time::{sleep, Duration},
@@ -20,10 +21,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::fs;
 
-use server::{schema::{devices, environments, projects}, state::StateDelta};
+use server::{controller::handle_http_connection, schema::{devices, environments, projects}, state::StateDelta};
 use shared::request_operations::{CurrentStatusResponse, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
 use shared::state_operations::{StateOperationMessage, StateAction};
-
 
 
 // fn listen(websocket: &mut WebSocketStream<TcpStream>, message_queue) {
@@ -146,7 +146,7 @@ async fn listen_device(
 
             let environments = conn.interact(move |conn| {
                 let device = devices::table
-                    .filter(devices::name.eq(machine_id))
+                    .filter(devices::machine_id.eq(machine_id))
                     .select(Devices::as_select())
                     .get_result(conn)
                     .optional()
@@ -212,7 +212,7 @@ async fn listen_device(
                         }
                     },
                     None => {
-                        println!("environment '{}' not found", environment_name);
+                        println!("Environment '{}' not found, sending state as is...", environment_name);
 
                         let environment_update = EnvironmentUpdate {
                             state: Some(latest_state_json.clone()),
@@ -268,14 +268,17 @@ async fn is_device_registered(machine_id: String, database_pool: Pool) -> bool {
 
     let is_device_none = conn.interact(move |conn| {
         let device = devices::table
-            .filter(devices::name.eq(machine_id.clone()))
+            .filter(devices::machine_id.eq(machine_id.clone()))
             .select(Devices::as_select())
             .get_result(conn)
             .optional()
             .expect("Database error");
 
+        println!("device {device:?}");
         return device.is_none();
     }).await.expect("Could not fetch device from database");
+
+    println!("is_none {is_device_none}");
 
     return !is_device_none
 }
@@ -361,7 +364,7 @@ async fn is_device_registered(machine_id: String, database_pool: Pool) -> bool {
 //         ws_stream,
 //     }
 // }
-//
+
 fn is_http_connection(req: &mut Request<Incoming>) -> bool { 
     let upgrade = HeaderValue::from_static("Upgrade");
     let websocket = HeaderValue::from_static("websocket");
@@ -392,42 +395,6 @@ fn is_http_connection(req: &mut Request<Incoming>) -> bool {
         || req.uri() != "/socket";
 }
 
-fn json_response(status_code: StatusCode, msg: String, data: serde_json::Value) -> Response<http_body_util::Full<tokio_tungstenite::tungstenite::Bytes>> {
-    let mut payload = serde_json::json!({});
-
-    payload["msg"] = msg.into();
-    payload["data"] = data.clone();
-
-    let bytes: tokio_tungstenite::tungstenite::Bytes = payload.to_string().into();
-
-    return Response::builder()
-        .header("content-type", "application/json")
-        .status(status_code)
-        .body(http_body_util::Full::from(bytes))
-        .expect("Failed to build response");
-}
-
-async fn handle_http_connection(req: &mut Request<Incoming>, database_pool: Pool) -> Response<http_body_util::Full<tokio_tungstenite::tungstenite::Bytes>> { 
-    let (uri, method) = (req.uri().clone().to_string(), req.method().clone());
-
-    match (uri.as_str(), method) {
-        ("/user", Method::POST) => {
-            return json_response(
-                StatusCode::OK,
-                String::from("Created user successfully"),
-                serde_json::Value::Null,
-            )
-        },
-        _ => {
-            return json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                String::default(),
-                serde_json::Value::Null,
-            )
-        }
-    };
-}
-
 #[derive(Debug)]
 pub enum ValidationError {
     NoMachineIdSet,
@@ -448,6 +415,17 @@ async fn validate_connection(listener_type: &ListenerType, machine_id: &Option<S
     } 
 
     Ok(())
+}
+
+fn error_response_json(message: &str, status_code: StatusCode) -> Response<http_body_util::Full<tokio_tungstenite::tungstenite::Bytes>> {
+    let body = serde_json::json!({"msg": message, "data": null}).to_string();
+
+    let mut error_response = Response::new(http_body_util::Full::from(body));
+
+    *error_response.status_mut() = status_code;
+    error_response.headers_mut().append("content-type", "application/json".parse().unwrap());
+
+    error_response
 }
 
 async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool: Pool) -> Result<Response<Body>, Infallible> {
@@ -502,27 +480,12 @@ async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool
         database_pool.clone()
     ).await;
 
-
     match validation_result {
         Err(ValidationError::DeviceNotRegistered) => {
-            let body = serde_json::json!({"msg": "Device not registered", "data": null}).to_string();
-
-            let mut error_response = Response::new(http_body_util::Full::from(body));
-
-            *error_response.status_mut() = StatusCode::NOT_FOUND;
-            error_response.headers_mut().append("content-type", "application/json".parse().unwrap());
-
-            return Ok(error_response);
+            return Ok(error_response_json("Device not registered", StatusCode::NOT_FOUND));
         },
         Err(ValidationError::NoMachineIdSet) => {
-            let body = serde_json::json!({"msg": "No machine-id set in header", "data": null}).to_string();
-
-            let mut error_response = Response::new(http_body_util::Full::from(body));
-
-            *error_response.status_mut() = StatusCode::NOT_FOUND;
-            error_response.headers_mut().append("content-type", "application/json".parse().unwrap());
-
-            return Ok(error_response);
+            return Ok(error_response_json("No machine-id set in header", StatusCode::BAD_REQUEST));
         }
         Ok(()) => {},
     };
@@ -556,33 +519,11 @@ async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool
     res.headers_mut().append(CONNECTION, upgrade);
     res.headers_mut().append(UPGRADE, websocket);
     res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
-    // Let's add an additional header to our response to the client.
-    res.headers_mut().append("MyCustomHeader", ":)".parse().unwrap());
-    res.headers_mut().append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap());
+
     Ok(res)
 }
 
-async fn handle_connection(
-    mut session: ListenerSession,
-    database_pool: Pool,
-) {
-    // let mut session = new_session(raw_stream, database_pool.clone()).await;
-
-    let device_registered = is_device_registered(
-        session.machine_id.clone(),
-        database_pool.clone()
-    ).await;
-
-    if !device_registered {
-        println!("Device not registered; closing connection...");
-        return
-    }
-
-    // if !session.authenticated {
-    //     println!("Authentication error; closing connection...");
-    //     return;
-    // }
-
+async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
     match session.listener_type {
         ListenerType::Device => {
             let mut current_state = RequestOperations::StatusRequest;
@@ -669,10 +610,11 @@ async fn handle_connection(
                         }).await;
                 },
                 StateAction::Preview => {
-
+                    unimplemented!("action not implemented yet");
                 },
-                _ => unimplemented!("action not implemented yet")
-
+                StateAction::Down => {
+                    unimplemented!("action not implemented yet");
+                }
             }
         },
         _ => {panic!("Listener type not implemented")}
@@ -680,7 +622,7 @@ async fn handle_connection(
 }
 
 use server::models::*;
-use diesel::{insert_into, prelude::*};
+use diesel::{insert_into, prelude::*, serialize::ToSql};
 use deadpool_diesel::{sqlite::{Manager, Pool, Runtime}, InteractError};
 use hyper::{
     body::Incoming, header::{
@@ -697,7 +639,6 @@ use tokio_tungstenite::{
 };
 
 type Body = http_body_util::Full<hyper::body::Bytes>;
-
 
 use hyper_util::rt::TokioIo;
 

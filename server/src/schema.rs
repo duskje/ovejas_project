@@ -5,6 +5,7 @@ diesel::table! {
         id -> Integer,
         name -> Text,
         created_at -> Timestamp,
+        machine_id -> Nullable<Text>,
     }
 }
 
