@@ -14,6 +14,27 @@ from .results import Result, TypeOrResult
 if _EXECUTION_CONTEXT is None:
     raise RuntimeError("This project needs to be executed with the CLI tool")
 
+def get_default_parameters(cls: type):
+    defaults = {}
+
+    for attribute, value in cls.__dict__.items():
+        if isinstance(value, Result):
+            continue
+
+        if attribute[:2] == '__':
+            continue
+
+        if attribute[:1] == '_':
+            continue
+
+        if attribute == '_set_dependents':
+            continue
+
+        defaults[attribute] = value
+
+    return defaults
+
+
 def create_init(cls: type):
     defaults = {}
 
@@ -126,6 +147,12 @@ class ResourceRegistry:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         object_instance: Resource = self.cls(*args, **kwargs)
+        parameters = get_default_parameters(self.cls)
+
+        for key, value in kwargs.items():
+            parameters[key] = value
+
+        print('parameters', parameters)
 
         registered_urns = (r.get('urn') for r in ResourceRegistry._registered_resources)
 
@@ -138,7 +165,7 @@ class ResourceRegistry:
 
         ResourceRegistry._registered_resources.append({
             'urn': object_instance.urn,
-            'parameters': kwargs,
+            'parameters': parameters,
             'depends_on': [dependent.urn for dependent in depends_on],
             'results': resolvables,
         })

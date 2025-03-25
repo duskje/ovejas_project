@@ -11,7 +11,7 @@ class User(Resource):
     resource_name: str
     uid: int
     name: str
-    gid: Optional[int] = -1
+    gid: Optional[int] = 0
 
 @provider_namespace(metadata)
 class Group(Resource):
