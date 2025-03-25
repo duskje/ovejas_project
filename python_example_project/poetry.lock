@@ -2,7 +2,7 @@
 
 [[package]]
 name = "ovejas"
-version = "0.3.96"
+version = "0.5.5"
 description = ""
 optional = false
 python-versions = "^3.12"
