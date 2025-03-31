@@ -15,3 +15,5 @@ shared = { version = "0.1.0", path = "../shared" }
 tungstenite = "0.26.0"
 walkdir = "2.5.0"
 regex = "1.11.1"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
