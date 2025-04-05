@@ -111,7 +111,7 @@ use shared::state_operations::{StateOperationMessage, StateAction};
 
 #[derive(Deserialize)]
 struct Config {
-    port: Option<String>,
+    port: Option<u64>,
     address: Option<String>,
     database_url: Option<String>,
 }
@@ -659,7 +659,7 @@ async fn main() {
         .unwrap();
     
     let address = config.address.unwrap_or("127.0.0.1".into());
-    let port = config.port.unwrap_or("9734".into());
+    let port = config.port.unwrap_or(9734u64.into());
 
     let full_address = format!("{address}:{port}");
 
