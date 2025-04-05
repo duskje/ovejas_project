@@ -1,2 +1,4 @@
 */target
-server/test.db
+server/*.db
+server/config.yml
+server/*.pem

@@ -19,6 +19,7 @@ Proyecto que envía los estados objetivo desde la herramienta de línea de coman
 
 ### Requisitos
 * [Diesel CLI](https://diesel.rs/guides/getting-started.html#installing-diesel-cli)
+* OpenSSL en Linux
 
 ### Instalación
 En el directorio `server/` es necesario ejecutar:
@@ -42,7 +43,8 @@ Las variables de entorno se pueden pasar mediante un archivo `.env` o mediante u
 Herramienta por interfaz de línea de comandos para levantar o bajar la infraestructura definida en un proyecto de Python.
 
 ### Requisitos
-- Python 3.12 (recomendado usar pyenv)
+* Python 3.12 (recomendado usar pyenv)
+* OpenSSL en Linux
 
 ### Instalación
 En el directorio `cli/` es necesario ejecutar:
@@ -57,7 +59,7 @@ Biblioteca compartida por el servidor y el agente para la serialización/deseria
 Proyecto que funciona como agente en el dispositivo y recibe las actualizaciones de infraestructura desde el servidor.
 
 ### Requisitos
-Ninguno.
+* OpenSSL en Linux
 
 ### Instalación
 En el directorio `device/` es necesario ejecutar:

@@ -13,11 +13,13 @@ pub struct States {
 }
 
 #[derive(Queryable, Selectable, Identifiable, Debug)]
+#[derive(Insertable)]
 #[diesel(table_name = crate::schema::devices)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Devices {
     pub id: i32,
     pub name: String,
+    pub machine_id: Option<String>,
     pub created_at: NaiveDateTime,
 }
 

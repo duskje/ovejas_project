@@ -1,11 +1,17 @@
 use std::collections::HashMap;
+use std::fs::create_dir;
+use std::ops::Deref;
 use std::{fs, net::TcpStream};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use device::state::StateDelta;
 use figment::{Figment, providers::{Format, Yaml, Env}};
-use http::Request;
+use http::{Request, Response};
 use md5::{Md5, Digest};
 use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
+use walkdir::WalkDir;
+use std::env::home_dir;
+use std::path::Path;
+use regex::Regex;
 
 use shared::request_operations::{CurrentStatusResponse, DeviceStatus, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
 
@@ -21,19 +27,103 @@ struct StateSchema {
     resources: Vec<ResourceSchema>,
 }
 
+const OVEJAS_DIR: &str = ".ovejas";
+
+fn get_ovejas_root_dir() -> String {
+    let home = home_dir().unwrap();
+
+    format!("{}/{OVEJAS_DIR}", home.to_string_lossy())
+}
+
 fn process_environment_update_request(environment: String, environment_update: EnvironmentUpdate) {
     match environment_update.operation {
         EnvironmentUpdateOperation::Create => {
-        },
-        EnvironmentUpdateOperation::Destroy => {
+            let target_state = environment_update.state.expect("Failed to get environment state");
+
+            let target_state_json: serde_json::Value = serde_json::from_str(target_state.clone().as_str()).unwrap();
+
+            let resources = target_state_json
+                .get("resources")
+                .expect("Target state doesn't have the key 'resources'")
+                .as_array()
+                .unwrap();
+
+            for resource in resources {
+                let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
+                resource.create(true);
+
+                println!("res {resource:?}");
+            }
+
+            let ovejas_root_dir = get_ovejas_root_dir();
+            let state_file_path = format!("{ovejas_root_dir}/state.{environment}.json");
+
+            fs::write(state_file_path, target_state.clone().as_str())
+                .expect(format!("Failed to write statefile({ovejas_root_dir})").as_str());
         },
         EnvironmentUpdateOperation::Update =>  {
-        }
+        },
+        EnvironmentUpdateOperation::Destroy => {
+            let ovejas_root_dir = get_ovejas_root_dir();
+            let state_file_path = format!("{ovejas_root_dir}/state.{environment}.json");
+            let local_state = fs::read_to_string(state_file_path.clone()).expect("Failed to read local state file");
+
+            let local_state_json: serde_json::Value = serde_json::from_str(local_state.as_str()).unwrap();
+
+            let resources = local_state_json
+                .get("resources")
+                .expect("Target state doesn't have the key 'resources'")
+                .as_array()
+                .unwrap();
+
+            for resource in resources {
+                let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
+                resource.delete(true);
+
+                println!("res {resource:?}");
+            }
+
+            fs::remove_file(state_file_path.clone()).expect("Failed to remove state file");
+        },
     }
 }
 
-fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
-    let msg = socket.read().expect("Error reading message");
+fn get_state_hashes() -> HashMap<String, [u8; 16]> {
+    let state_dir = get_ovejas_root_dir();
+
+    let mut state_hashes = HashMap::new();
+
+    for dir in WalkDir::new(state_dir).min_depth(1) {
+        let dir_result = dir.unwrap();
+
+        let file_name: &str = dir_result.path().file_name().unwrap().to_str().unwrap();
+        let captures = Regex::new(r"^state.([A-Za-z]+).json$").unwrap().captures(file_name);
+
+        match captures {
+            Some(captures) => {
+                let file_path = dir_result.path().to_str().unwrap();
+                let local_state = fs::read_to_string(file_path)
+                    .expect("Could not open local state");
+
+                let environment = captures.get(1).unwrap().as_str();
+
+                let mut hasher = Md5::new();
+                hasher.update(local_state);
+                let state_hash: [u8; 16] = hasher.finalize().into();
+
+                state_hashes.insert((environment).to_string(), state_hash);
+            },
+            None => {
+                continue;
+            }
+        }
+    }
+
+    state_hashes
+}
+
+fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<(), Box<dyn std::error::Error>> {
+    let msg = socket.read()?;
 
     if !msg.is_binary() {
         panic!("Invalid read!");
@@ -45,16 +135,7 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
         RequestOperations::StatusRequest => {
             println!("Remote requested current state");
 
-            let local_state = fs::read_to_string("local_state.json")
-                .expect("Could not open local state");
-
-            let mut hasher = Md5::new();
-            hasher.update(local_state);
-            let state_hash: [u8; 16] = hasher.finalize().into();
-
-            let mut state_hashes = HashMap::new();
-
-            state_hashes.insert("development".to_string(), state_hash);
+            let state_hashes = get_state_hashes();
 
             let current_status = CurrentStatusResponse {
                 status: DeviceStatus::Idle,
@@ -66,6 +147,8 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
                 .expect("Could not send device status to remote");
         },
         RequestOperations::UpdateEnvironmentsRequest(environment_updates) => {
+            println!("{environment_updates:?}");
+
             for (environment, environment_update) in environment_updates {
                 println!(
                     "Remote sent state {:?} -> {:?}",
@@ -80,12 +163,14 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
             }
         },
     };
+
+    Ok(())
 }
 
 use std::process::Command;
 
 use serde::{de::Error, Deserialize, Serialize};
-use serde_json::{Result, Value};
+use serde_json::{Result as SerdeJsonResult, Value};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct User {
@@ -100,13 +185,13 @@ enum Action {
     Delete,
 }
 
-trait ResourceActions {
+trait ResourceProvider {
     fn create(&self);
     fn update(&self);
     fn delete(&self);
 }
 
-impl ResourceActions for User {
+impl ResourceProvider for User {
     fn create(&self) {
         let result = Command::new("useradd")
             .args([
@@ -151,27 +236,68 @@ struct Resource {
 }
 
 impl Resource {
-    fn get_resource(&self, action: Action, dry_run: bool) -> Result<()> {
+    fn get_provider(&self) -> Box<dyn ResourceProvider> {
         let urn_split: Vec<&str> = self.urn.split("::").collect();
-        let [module, kind, resource_id] = urn_split.try_into()
+        let [provider_module, kind, resource_id] = urn_split.try_into()
             .expect("Invalid urn");
 
-        let resource = match kind {
-            "User" => serde_json::from_value::<User>(self.parameters.clone())?,
+        let provider = match kind {
+            "User" => serde_json::from_value::<User>(self.parameters.clone()).unwrap(),
             _ => panic!["resource does not exist"],
         };
-        
-        if !dry_run {
-            match action {
-                Action::Create => resource.create(),
-                Action::Delete => resource.delete(),
-                Action::Update => resource.update(),
-            };
+
+        Box::new(provider)
+    }
+    
+//    fn execute(&self, action: Action, dry_run: bool) -> SerdeJsonResult<()> {
+//        let urn_split: Vec<&str> = self.urn.split("::").collect();
+//        let [provider_module, kind, resource_id] = urn_split.try_into()
+//            .expect("Invalid urn");
+//
+//        let resource = match kind {
+//            "User" => serde_json::from_value::<User>(self.parameters.clone())?,
+//            _ => panic!["resource does not exist"],
+//        };
+//        
+//        if !dry_run {
+//            match action {
+//                Action::Create => resource.create(),
+//                Action::Delete => resource.delete(),
+//                Action::Update => resource.update(),
+//            };
+//        }
+//
+//        Ok(())
+//    }
+
+    fn create(&self, dry_run: bool) {
+        if dry_run {
+            return;
         }
 
-        Ok(())
+        let provider = self.get_provider();
+        provider.deref().create();
+    }
+
+    fn delete(&self, dry_run: bool) {
+        if dry_run {
+            return;
+        }
+
+        let provider = self.get_provider();
+        provider.deref().delete();
+    }
+
+    fn update(&self, dry_run: bool) {
+        if dry_run {
+            return;
+        }
+
+        let provider = self.get_provider();
+        provider.deref().update();
     }
 }
+
 
 //fn main() -> Result<()> {
 //    // let target_state = r#"
@@ -231,6 +357,17 @@ struct Config {
     database_path: Option<String>,
 }
 
+#[derive(Debug)]
+struct ServerError {
+    reason_given: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServerResponse {
+    data: Option<serde_json::Value>,
+    msg: Option<String>,
+}
+
 fn main() {
     let config: Config = Figment::new()
         .merge(Yaml::file("config.yaml"))
@@ -249,14 +386,43 @@ fn main() {
         .header("host", address)
         .header("connection", "upgrade")
         .header("machine-type", "device")
-        .header("machine-id", "device_test_name")
+        .header("machine-id", "place-holder-machine-id")
         .header("authorization", "device_token")
         .header("sec-websocket-version", 13)
         .body(())
         .unwrap();
 
-    let (mut websocket, response) = connect(request)
-        .expect("Could not connect to the server");
+    let home = home_dir().unwrap();
+
+    let state_dir = format!("{}/{OVEJAS_DIR}", home.to_string_lossy());
+
+    use std::path::Path;
+
+    if !Path::new(state_dir.as_str()).exists() {
+        fs::create_dir(state_dir).expect("Failed to create state dir");
+//        let mut initial_state = serde_json::json!({
+//            "version": 1,
+//            "resources": []
+//        });
+//
+//        let current_time: String = chrono::offset::Local::now().to_string();
+//
+//        initial_state["current_time"] = current_time.into();
+//
+//        fs::write(state_file_path, serde_json::to_string(&initial_state).unwrap().as_str()).expect("Failed to write default state file");
+    }
+
+    let (mut websocket, response) = connect(request).map_err(|e: tungstenite::Error| {
+        match e {
+            tungstenite::Error::Http(response) => {
+                let response_body = response.body().clone().unwrap();
+                let response_json: ServerResponse = serde_json::from_str(String::from_utf8(response_body).unwrap().as_str()).expect("Could not parse server response");
+
+                ServerError { reason_given: response_json.msg.unwrap() }
+            },
+            _ => ServerError { reason_given: String::from("No reason given") }
+        }
+    }).expect("Could not connect to the server");
 
     println!("Connected successfully to the server!");
     println!("HTTP status code: {}", response.status());
@@ -267,6 +433,11 @@ fn main() {
     }
 
     loop {
-        listen(&mut websocket);
+        match listen(&mut websocket) {
+            Ok(_) => {},
+            Err(err) => {
+                println!("{err:?}");
+            }
+        };
     }
 }

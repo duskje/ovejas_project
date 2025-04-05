@@ -1,35 +1,29 @@
 use futures::{future, SinkExt, StreamExt, TryStreamExt};
+use http_body_util::BodyExt;
 use md5::{Md5, Digest};
 use tokio::{
     time::{sleep, Duration},
     net::{TcpListener, TcpStream},
 };
+
 use tokio_tungstenite::{
-    accept_hdr_async, tungstenite::handshake::client::Request, WebSocketStream
+    accept_hdr_async, WebSocketStream
 };
 
 use std::{
-    borrow::BorrowMut,
-    collections::HashMap,
-    io::Error,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
+    borrow::BorrowMut, collections::HashMap, convert::Infallible, error::Error, net::SocketAddr, sync::{Arc, Mutex}
 };
 
 use figment::{Figment, providers::{Format, Yaml, Env}};
 
 use serde::Deserialize;
-use tungstenite::{
-    accept, accept_hdr, handshake::server::Response, http::StatusCode, WebSocket
-};
 
 use serde_json::Value;
 use std::fs;
 
-use server::{schema::{devices, environments, projects}, state::StateDelta};
+use server::{controller::handle_http_connection, schema::{devices, environments, projects}, state::StateDelta};
 use shared::request_operations::{CurrentStatusResponse, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
 use shared::state_operations::{StateOperationMessage, StateAction};
-
 
 
 // fn listen(websocket: &mut WebSocketStream<TcpStream>, message_queue) {
@@ -152,7 +146,7 @@ async fn listen_device(
 
             let environments = conn.interact(move |conn| {
                 let device = devices::table
-                    .filter(devices::name.eq(machine_id))
+                    .filter(devices::machine_id.eq(machine_id))
                     .select(Devices::as_select())
                     .get_result(conn)
                     .optional()
@@ -218,7 +212,7 @@ async fn listen_device(
                         }
                     },
                     None => {
-                        println!("environment '{}' not found", environment_name);
+                        println!("Environment '{}' not found, sending state as is...", environment_name);
 
                         let environment_update = EnvironmentUpdate {
                             state: Some(latest_state_json.clone()),
@@ -257,7 +251,6 @@ async fn listen_device(
 enum ListenerType {
     Device,
     CLI,
-    Error,
 }
 
 use server::models::*;
@@ -267,7 +260,7 @@ struct ListenerSession {
     machine_id: String,
     listener_type: ListenerType,
     bearer_token: String,
-    ws_stream: WebSocketStream<TcpStream>,
+    ws_stream: WebSocketStream<TokioIo<Upgraded>>,
 }
 
 async fn is_device_registered(machine_id: String, database_pool: Pool) -> bool { 
@@ -275,102 +268,262 @@ async fn is_device_registered(machine_id: String, database_pool: Pool) -> bool {
 
     let is_device_none = conn.interact(move |conn| {
         let device = devices::table
-            .filter(devices::name.eq(machine_id.clone()))
+            .filter(devices::machine_id.eq(machine_id.clone()))
             .select(Devices::as_select())
             .get_result(conn)
             .optional()
             .expect("Database error");
 
+        println!("device {device:?}");
         return device.is_none();
     }).await.expect("Could not fetch device from database");
+
+    println!("is_none {is_device_none}");
 
     return !is_device_none
 }
 
-async fn new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSession {
-    let mut listener_type = ListenerType::Error;
-    let mut machine_id: String = String::default();
-    let mut bearer_token: String = String::default();
+// async fn old_new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSession {
+//     let mut listener_type = ListenerType::Error;
+//     let mut machine_id: String = String::default();
+//     let mut bearer_token: String = String::default();
+// 
+//     let callback = |req: &Request, mut response: Response| {
+//         println!("request path: {}", req.uri().path());
+// 
+//         for (header, value) in req.headers() {
+//             println!("* {header}: {value:?}");
+//         }
+// 
+//         let auth_value = req.headers()
+//             .get("authorization");
+// 
+//         if auth_value.is_none() {
+//             *response.status_mut() = StatusCode::UNAUTHORIZED;
+//             return Ok(response);
+//         }
+// 
+//         bearer_token = auth_value
+//             .expect("Client didn't set a value to header 'machine-id'")
+//             .to_str()
+//             .expect("Error while retrieving header 'machine-id'")
+//             .to_string();
+// 
+//         machine_id = req.headers()
+//             .get("machine-id")
+//             .expect("Client didn't set a value to header 'machine-id'")
+//             .to_str()
+//             .expect("Error while retrieving header 'machine-id'")
+//             .to_string();
+// 
+//         let machine_type = req.headers()
+//             .get("machine-type")
+//             .expect("Client didn't set a value to header 'machine-type'")
+//             .to_str()
+//             .expect("Error while retrieving header 'machine-type'");
+// 
+//         match machine_type {
+//             "device" => {
+//                 listener_type = ListenerType::Device;
+//             },
+//             "cli" => {
+//                 listener_type = ListenerType::CLI;
+//             }
+//             _ => {
+//                 panic!("Invalid value for 'machine-type' ({machine_type})")
+//             }
+//         }
+// 
+//         println!("Listener type set to '{listener_type:?}'");
+// 
+//         Ok(response)
+//     };
+// 
+//     let ws_stream = accept_hdr_async(raw_stream, callback).await.expect("Error during handshake");
+// 
+//     ListenerSession {
+//         machine_id,
+//         listener_type,
+//         bearer_token,
+//         ws_stream,
+//     }
+// }
 
-    let callback = |req: &Request, mut response: Response| {
-        println!("request path: {}", req.uri().path());
+// async fn old_new_session(req: Request, database_pool: Pool) -> ListenerSession {
+//     println!("Received a new, potentially ws handshake");
+//     println!("The request's path is: {}", req.uri().path());
+//     println!("The request's headers are:");
+//     for (ref header, _value) in req.headers() {
+//         println!("* {}", header);
+//     }
+// 
+//     ListenerSession {
+//         machine_id,
+//         listener_type,
+//         bearer_token,
+//         ws_stream,
+//     }
+// }
 
-        for (header, value) in req.headers() {
-            println!("* {header}: {value:?}");
-        }
+fn is_http_connection(req: &mut Request<Incoming>) -> bool { 
+    let upgrade = HeaderValue::from_static("Upgrade");
+    let websocket = HeaderValue::from_static("websocket");
 
-        let auth_value = req.headers()
-            .get("authorization");
+    let headers = req.headers();
 
-        if auth_value.is_none() {
-            *response.status_mut() = StatusCode::UNAUTHORIZED;
-            return Ok(response);
-        }
+    let key = headers.get(SEC_WEBSOCKET_KEY);
 
-        bearer_token = auth_value
-            .expect("Client didn't set a value to header 'machine-id'")
-            .to_str()
-            .expect("Error while retrieving header 'machine-id'")
-            .to_string();
+    let derived = key.map(|k| derive_accept_key(k.as_bytes()));
 
-        machine_id = req.headers()
-            .get("machine-id")
-            .expect("Client didn't set a value to header 'machine-id'")
-            .to_str()
-            .expect("Error while retrieving header 'machine-id'")
-            .to_string();
-
-        let machine_type = req.headers()
-            .get("machine-type")
-            .expect("Client didn't set a value to header 'machine-type'")
-            .to_str()
-            .expect("Error while retrieving header 'machine-type'");
-
-        match machine_type {
-            "device" => {
-                listener_type = ListenerType::Device;
-            },
-            "cli" => {
-                listener_type = ListenerType::CLI;
-            }
-            _ => {
-                panic!("Invalid value for 'machine-type' ({machine_type})")
-            }
-        }
-
-        println!("Listener type set to '{listener_type:?}'");
-
-        Ok(response)
-    };
-
-    let ws_stream = accept_hdr_async(raw_stream, callback).await.expect("Error during handshake");
-
-    ListenerSession {
-        machine_id,
-        listener_type,
-        bearer_token,
-        ws_stream,
-    }
+    return req.method() != Method::GET
+        || req.version() < Version::HTTP_11
+        || !headers
+            .get(CONNECTION)
+            .and_then(|h| h.to_str().ok())
+            .map(|h| {
+                h.split(|c| c == ' ' || c == ',')
+                    .any(|p| p.eq_ignore_ascii_case(upgrade.to_str().unwrap()))
+            })
+            .unwrap_or(false)
+        || !headers
+            .get(UPGRADE)
+            .and_then(|h| h.to_str().ok())
+            .map(|h| h.eq_ignore_ascii_case("websocket"))
+            .unwrap_or(false)
+        || !headers.get(SEC_WEBSOCKET_VERSION).map(|h| h == "13").unwrap_or(false)
+        || key.is_none()
+        || req.uri() != "/socket";
 }
 
-async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr, database_pool: Pool) {
-    let mut session = new_session(raw_stream, database_pool.clone()).await;
+#[derive(Debug)]
+pub enum ValidationError {
+    NoMachineIdSet,
+    DeviceNotRegistered,
+}
 
-    let device_registered = is_device_registered(
-        session.machine_id.clone(),
+async fn validate_connection(listener_type: &ListenerType, machine_id: &Option<String>, database_pool: Pool) -> Result<(), ValidationError> {
+    match listener_type {
+        ListenerType::Device => { 
+            if machine_id.is_none() { return Err(ValidationError::NoMachineIdSet); };
+
+            let machine_id = machine_id.clone().expect("Expected machine id");
+
+            if !is_device_registered(machine_id, database_pool).await { return Err(ValidationError::DeviceNotRegistered); }
+        },
+        ListenerType::CLI => {
+        },
+    } 
+
+    Ok(())
+}
+
+fn error_response_json(message: &str, status_code: StatusCode) -> Response<http_body_util::Full<tokio_tungstenite::tungstenite::Bytes>> {
+    let body = serde_json::json!({"msg": message, "data": null}).to_string();
+
+    let mut error_response = Response::new(http_body_util::Full::from(body));
+
+    *error_response.status_mut() = status_code;
+    error_response.headers_mut().append("content-type", "application/json".parse().unwrap());
+
+    error_response
+}
+
+async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool: Pool) -> Result<Response<Body>, Infallible> {
+    println!("Received a new, potentially ws handshake");
+    println!("The request's path is: {}", req.uri().path());
+    println!("The request's headers are:");
+
+    for (ref header, _value) in req.headers() {
+        println!("* {}", header);
+    }
+
+    let upgrade = HeaderValue::from_static("Upgrade");
+    let websocket = HeaderValue::from_static("websocket");
+    let headers = req.headers();
+
+    let key = headers.get(SEC_WEBSOCKET_KEY);
+
+    let derived = key.map(|k| derive_accept_key(k.as_bytes()));
+
+    let ver = req.version();
+
+    let machine_id = req.headers()
+        .get("machine-id")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| Some(header.to_string()));
+
+    let bearer_token = req.headers()
+        .get("authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| Some(header.to_string()));
+
+    let listener_type = req.headers()
+        .get("machine-type")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|listener_type| {
+            match listener_type {
+                "device" => {
+                    return Some(ListenerType::Device);
+                },
+                "cli" => {
+                    return Some(ListenerType::CLI);
+                }
+                _ => {
+                    return None;
+                }
+            }
+        }).expect("Invalid value for 'machine-type' ({listener_type})") ;
+
+    let validation_result  = validate_connection(
+        &listener_type,
+        &machine_id,
         database_pool.clone()
     ).await;
 
-    if !device_registered {
-        println!("Device not registered; closing connection...");
-        return
+    match validation_result {
+        Err(ValidationError::DeviceNotRegistered) => {
+            return Ok(error_response_json("Device not registered", StatusCode::NOT_FOUND));
+        },
+        Err(ValidationError::NoMachineIdSet) => {
+            return Ok(error_response_json("No machine-id set in header", StatusCode::BAD_REQUEST));
+        }
+        Ok(()) => {},
+    };
+
+    if is_http_connection(&mut req) {
+        return Ok(handle_http_connection(&mut req, database_pool).await);
     }
 
-    // if !session.authenticated {
-    //     println!("Authentication error; closing connection...");
-    //     return;
-    // }
+    tokio::task::spawn(async move {
+        match hyper::upgrade::on(&mut req).await {
+            Ok(upgraded) => {
+                let upgraded = TokioIo::new(upgraded);
 
+                handle_connection(ListenerSession {
+                        machine_id: machine_id.expect("Error while retrieving header 'machine-id'"),
+                        listener_type: listener_type,
+                        bearer_token: bearer_token.expect("Error while retrieving header 'authorization'"),
+                        ws_stream: WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await,
+                }, database_pool.clone())
+                .await;
+            }
+            Err(e) => println!("Failed to upgrade {}", e),
+        }
+    });
+
+    let mut res = Response::new(Body::default());
+
+    *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+    *res.version_mut() = ver;
+
+    res.headers_mut().append(CONNECTION, upgrade);
+    res.headers_mut().append(UPGRADE, websocket);
+    res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
+
+    Ok(res)
+}
+
+async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
     match session.listener_type {
         ListenerType::Device => {
             let mut current_state = RequestOperations::StatusRequest;
@@ -457,13 +610,11 @@ async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr, database_poo
                         }).await;
                 },
                 StateAction::Preview => {
-
+                    unimplemented!("action not implemented yet");
                 },
-                StateAction::Admin => {
-
-                },
-                _ => unimplemented!("action not implemented yet")
-
+                StateAction::Down => {
+                    unimplemented!("action not implemented yet");
+                }
             }
         },
         _ => {panic!("Listener type not implemented")}
@@ -471,8 +622,25 @@ async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr, database_poo
 }
 
 use server::models::*;
-use diesel::{insert_into, prelude::*};
+use diesel::{insert_into, prelude::*, serialize::ToSql};
 use deadpool_diesel::{sqlite::{Manager, Pool, Runtime}, InteractError};
+use hyper::{
+    body::Incoming, header::{
+        HeaderValue, CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION,
+        UPGRADE,
+    }, server::conn::http1, service::service_fn, upgrade::Upgraded, HeaderMap, Method, Request, Response, StatusCode, Version
+};
+
+use tokio_tungstenite::{
+    tungstenite::{
+        handshake::derive_accept_key,
+        protocol::{Message, Role},
+    },
+};
+
+type Body = http_body_util::Full<hyper::body::Bytes>;
+
+use hyper_util::rt::TokioIo;
 
 #[tokio::main]
 async fn main() {
@@ -501,6 +669,17 @@ async fn main() {
     let listener = try_socket.expect("Failed to bind");
     
     while let Ok((stream, addr)) = listener.accept().await {
-        tokio::spawn(handle_connection(stream, addr, pool.clone()));
+        let pool_ref = pool.clone();
+
+        tokio::spawn(async move {
+            let service = service_fn(move |req| new_session(req, addr, pool_ref.clone()));
+
+            let io = TokioIo::new(stream);
+            let conn = http1::Builder::new().serve_connection(io, service).with_upgrades();
+
+            if let Err(err) = conn.await {
+                eprintln!("failed to serve connection: {err:?}");
+            }
+        });
     }
 }

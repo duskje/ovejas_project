@@ -2,7 +2,7 @@ from typing import Any, Optional
 import sys
 import os
 
-debug = os.environ['OVEJAS_EXECUTOR_DEBUG']
+debug = os.environ.get('OVEJAS_EXECUTOR_DEBUG')
 debug = debug == 'true' if debug is not None else False
 
 def hide_output(debug_mode_enabled: bool):
