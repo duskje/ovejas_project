@@ -69,3 +69,5 @@ diesel generate run
 cargo build
 ```
 
+## Infraestructura (infra/)
+Proyecto de OpenTofu que levanta un agente en un servicio de nube
