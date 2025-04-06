@@ -59,8 +59,10 @@ fn process_environment_update_request(environment: String, environment_update: E
             let ovejas_root_dir = get_ovejas_root_dir();
             let state_file_path = format!("{ovejas_root_dir}/state.{environment}.json");
 
-            fs::write(state_file_path, target_state.clone().as_str())
+            if !dry_run {
+                fs::write(state_file_path, target_state.clone().as_str())
                 .expect(format!("Failed to write statefile({ovejas_root_dir})").as_str());
+            }
         },
         EnvironmentUpdateOperation::Update =>  {
             let target_state = environment_update.state.expect("Failed to get environment state");
@@ -92,8 +94,10 @@ fn process_environment_update_request(environment: String, environment_update: E
                 resource.create(dry_run);
             }
 
-            fs::write(state_file_path, target_state.clone().as_str())
-                .expect(format!("Failed to write statefile({ovejas_root_dir})").as_str());
+            if !dry_run {
+                fs::write(state_file_path, target_state.clone().as_str())
+                    .expect(format!("Failed to write statefile({ovejas_root_dir})").as_str());
+            }
         },
         EnvironmentUpdateOperation::Destroy => {
             let ovejas_root_dir = get_ovejas_root_dir();
@@ -115,7 +119,9 @@ fn process_environment_update_request(environment: String, environment_update: E
                 println!("res {resource:?}");
             }
 
-            fs::remove_file(state_file_path.clone()).expect("Failed to remove state file");
+            if !dry_run {
+                fs::remove_file(state_file_path.clone()).expect("Failed to remove state file");
+            }
         },
     }
 }
@@ -157,7 +163,6 @@ fn get_state_hashes() -> HashMap<String, [u8; 16]> {
 use tracing::{info, instrument};
 use tracing_subscriber;
 
-#[instrument]
 fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<(), Box<dyn std::error::Error>> {
     let msg = socket.read()?;
 
@@ -169,7 +174,7 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<(), Box<d
 
     match op_code {
         RequestOperations::StatusRequest => {
-            println!("Remote requested current state");
+            info!("Remote requested current state");
 
             let state_hashes = get_state_hashes();
 
@@ -183,13 +188,10 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<(), Box<d
                 .expect("Could not send device status to remote");
         },
         RequestOperations::UpdateEnvironmentsRequest(environment_updates) => {
-            info!("{environment_updates:?}");
-
             for (environment, environment_update) in environment_updates {
-                println!(
-                    "Remote sent state {:?} -> {:?}",
-                    environment.clone(),
-                    environment_update.clone(),
+                info!(
+                    environment = environment.clone(),
+                    state = environment_update.clone().state,
                 );
 
                 process_environment_update_request(
@@ -337,9 +339,8 @@ impl Resource {
 
 #[derive(Deserialize)]
 struct Config {
-    port: Option<String>,
+    port: Option<u64>,
     address: Option<String>,
-    database_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -360,7 +361,7 @@ fn main() {
         .extract().unwrap();
 
     let address = config.address.unwrap_or("localhost".into());
-    let port = config.port.unwrap_or("9734".into());
+    let port = config.port.unwrap_or(9734u64.into());
 
     tracing_subscriber::fmt::init();
 
@@ -401,9 +402,9 @@ fn main() {
         }
     }).expect("Could not connect to the server");
 
-    println!("Connected successfully to the server!");
-    println!("HTTP status code: {}", response.status());
-    println!("Response headers:");
+    info!("Connected successfully to the server!");
+    info!("HTTP status code: {}", response.status());
+    info!("Response headers:");
 
     for (header, _value) in response.headers() {
         println!("* {header}");

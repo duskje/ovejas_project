@@ -2,6 +2,8 @@ use std::net::TcpStream;
 use std::fs::File;
 use std::io::prelude::*;
 
+use figment::providers::{Format, Env, Yaml};
+use figment::Figment;
 use http::{Request, StatusCode};
 
 use pyo3::ffi::PyErr_SetInterrupt;
@@ -95,6 +97,12 @@ fn get_project_metadata() -> Result<ProjectMetadata, ProjectError> {
 struct ServerResponse {
     msg: String,
     data: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct Config {
+    port: Option<u64>,
+    address: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -192,9 +200,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let matches = cmd.get_matches();
 
-    let host = String::from("localhost");
-    let port = String::from("9734");
-    let full_addr = format!("{host}:{port}");
+    let config: Config = Figment::new()
+        .merge(Yaml::file("config.yml"))
+        .join(Env::raw().only(&["PORT", "ADDRESS"]))
+        .extract().unwrap();
+
+    let address = config.address.unwrap_or("127.0.0.1".into());
+    let port = config.port.unwrap_or(9734u64.into());
+
+    let full_addr = format!("{address}:{port}");
 
     match matches.subcommand() {
         Some(("up", matches)) => {
