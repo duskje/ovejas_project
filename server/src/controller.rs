@@ -1,9 +1,9 @@
 use deadpool_diesel::sqlite::Pool;
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, Method, Request, Response, StatusCode};
-use shared::rest_dtos::DeviceCreateDTO;
+use shared::rest_dtos::{DeviceCreateDTO, DeviceDeleteDTO};
 
-use crate::repository::device_create;
+use crate::repository::{device_create, device_delete};
 
 pub fn json_response(status_code: StatusCode, msg: String, data: serde_json::Value) -> Response<http_body_util::Full<tokio_tungstenite::tungstenite::Bytes>> {
     let mut payload = serde_json::json!({});
@@ -32,7 +32,6 @@ pub async fn handle_http_connection(req: &mut Request<Incoming>, database_pool: 
 
     match (uri.as_str(), method) {
         ("/device", Method::POST) => {
-
             let json: DeviceCreateDTO = serde_json::from_slice(body.as_slice()).unwrap();
 
             let result = device_create(json.name, json.machine_id, database_pool).await;
@@ -46,7 +45,10 @@ pub async fn handle_http_connection(req: &mut Request<Incoming>, database_pool: 
             )
         },
         ("/device", Method::DELETE) => {
-            // TODO: implement
+            let json: DeviceDeleteDTO = serde_json::from_slice(body.as_slice()).unwrap();
+            
+            let result = device_delete(json.name, database_pool).await;
+
             return json_response(
                 StatusCode::OK,
                 String::from("Deleted device successfully"),
