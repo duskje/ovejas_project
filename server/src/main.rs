@@ -1,27 +1,19 @@
-use futures::{future, SinkExt, StreamExt, TryStreamExt};
-use http_body_util::BodyExt;
+use futures::{SinkExt, StreamExt};
 use md5::{Md5, Digest};
 use tokio::{
     time::{sleep, Duration},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
 };
 
-use tokio_tungstenite::{
-    accept_hdr_async, WebSocketStream
-};
+use tokio_tungstenite::WebSocketStream;
 
-use std::{
-    borrow::BorrowMut, collections::HashMap, convert::Infallible, error::Error, net::SocketAddr, sync::{Arc, Mutex}
-};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr};
 
 use figment::{Figment, providers::{Format, Yaml, Env}};
 
 use serde::Deserialize;
 
-use serde_json::Value;
-use std::fs;
-
-use server::{controller::handle_http_connection, schema::{devices, environments, projects}, state::StateDelta};
+use server::{controller::handle_http_connection, schema::{devices, environments, projects}};
 use shared::request_operations::{CurrentStatusResponse, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
 use shared::state_operations::{StateOperationMessage, StateAction};
 
@@ -31,8 +23,6 @@ struct Config {
     address: Option<String>,
     database_url: Option<String>,
 }
-
-type MessageQueue = Arc<Mutex<HashMap<String, String>>>;
 
 async fn listen_device(
     session: &mut ListenerSession,
@@ -446,21 +436,18 @@ async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
     }
 }
 
-use server::models::*;
-use diesel::{insert_into, prelude::*, serialize::ToSql};
-use deadpool_diesel::{sqlite::{Manager, Pool, Runtime}, InteractError};
+use diesel::{insert_into, prelude::*};
+use deadpool_diesel::sqlite::{Manager, Pool, Runtime};
 use hyper::{
     body::Incoming, header::{
         HeaderValue, CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION,
         UPGRADE,
-    }, server::conn::http1, service::service_fn, upgrade::Upgraded, HeaderMap, Method, Request, Response, StatusCode, Version
+    }, server::conn::http1, service::service_fn, upgrade::Upgraded, Method, Request, Response, StatusCode, Version
 };
 
-use tokio_tungstenite::{
-    tungstenite::{
-        handshake::derive_accept_key,
-        protocol::{Message, Role},
-    },
+use tokio_tungstenite::tungstenite::{
+    handshake::derive_accept_key,
+    protocol::Role,
 };
 
 type Body = http_body_util::Full<hyper::body::Bytes>;

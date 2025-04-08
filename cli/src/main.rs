@@ -2,6 +2,7 @@ use std::net::TcpStream;
 use std::fs::File;
 use std::io::prelude::*;
 
+use clap::{Arg, ArgAction};
 use figment::providers::{Format, Env, Yaml};
 use figment::Figment;
 use http::{Request, StatusCode};
@@ -13,9 +14,11 @@ use toml::{self, Value};
 
 use ovejas::project::find_project_root;
 use ovejas::executor::python_executor;
-use ovejas::rest::{UserCreateDTO, UserDeleteDTO, DeviceDeleteDTO, DeviceCreateDTO};
+use ovejas::rest::{UserCreateDTO, UserDeleteDTO, DeviceDeleteDTO, DeviceCreateDTO, EnrollDeviceDTO};
 use shared::state_operations::{StateAction, StateOperationMessage};
 use tungstenite::error::Error;
+
+use uuid::Uuid;
 
 fn init_conn(full_addr: String) -> (WebSocket<MaybeTlsStream<TcpStream>>, Response) {
     let request = Request::builder()
@@ -139,6 +142,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .required(true)
                         .value_parser(clap::value_parser!(String)),
                     )
+                    .arg(
+                        Arg::new("machine-id")  
+                        .short('i')
+                        .long("machine-id")
+                        .action(ArgAction::Set)
+                        .value_name("UUID")
+                    )
             )
             .subcommand(
                 clap::command!("delete").arg(
@@ -153,9 +163,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .arg(clap::arg!(-e --env <ENV>))
                 .subcommand(
                     clap::command!("add-user").arg(
-                            clap::arg!(-n --name <NAME>)
-                            .required(true)
-                            .value_parser(clap::value_parser!(String)),
+                        clap::arg!(-n --name <NAME>)
+                        .required(true)
+                        .value_parser(clap::value_parser!(String)),
                     )
                 )
                 .subcommand(
@@ -167,9 +177,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .subcommand(
                     clap::command!("add-device").arg(
-                            clap::arg!(-n --name <NAME>)
-                            .required(true)
-                            .value_parser(clap::value_parser!(String)),
+                        Arg::new("machine-id")  
+                        .short('i')
+                        .long("machine-id")
+                        .action(ArgAction::Set)
+                        .value_name("UUID")
                     )
                 )
                 .subcommand(
@@ -270,10 +282,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match matches.subcommand() {
                 Some(("write", matches)) => {
                     let name = matches.get_one::<String>("name").expect("Expected name");
+                    let machine_id = matches.get_one::<String>("machine-id").expect("Expected machine-id");
 
                     let device_create_dto = DeviceCreateDTO {
                         name: name.to_string(),
-                        machine_id: String::from("place-holder-machine-id"),
+                        machine_id: machine_id.to_string(),
                     };
 
                     println!("{device_create_dto:?}");
@@ -301,6 +314,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     println!("{:?}", response.json::<ServerResponse>());
                 
+                },
+                _ => unreachable!("Clap should ensure we don't get here"),
+            }
+        },
+        Some(("environment", matches)) => {
+            let environment = matches.get_one::<String>("env").expect("Expected environment");
+
+            match matches.subcommand() {
+                Some(("add-device", matches)) => {
+                    let machine_id = matches.get_one::<String>("machine-id").expect("Expected machine-id");
+
+                    let project_metadata = get_project_metadata().unwrap();
+
+                    let device_create_dto = EnrollDeviceDTO {
+                        machine_id: machine_id.to_string(),
+                        environment_name: environment.to_string(),
+                        project_name: project_metadata.project_name,
+                    };
+
+                    println!("{device_create_dto:?}");
+
+                    let client = reqwest::blocking::Client::new();
+
+                    let response = client.post(format!("http://{full_addr}/enroll_device"))
+                        .json(&device_create_dto)
+                        .header("machine-type", "cli").send().unwrap();
+
+                    println!("{:?}", response.json::<ServerResponse>());
                 },
                 _ => unreachable!("Clap should ensure we don't get here"),
             }

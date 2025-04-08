@@ -21,3 +21,10 @@ pub struct UserCreateDTO {
 pub struct UserDeleteDTO {
     pub name: String,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EnrollDeviceDTO {
+    pub machine_id: String,
+    pub project_name: String,
+    pub environment_name: String,
+}
