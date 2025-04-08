@@ -1,113 +1,21 @@
-use futures::{future, SinkExt, StreamExt, TryStreamExt};
-use http_body_util::BodyExt;
+use futures::{SinkExt, StreamExt};
 use md5::{Md5, Digest};
 use tokio::{
     time::{sleep, Duration},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
 };
 
-use tokio_tungstenite::{
-    accept_hdr_async, WebSocketStream
-};
+use tokio_tungstenite::WebSocketStream;
 
-use std::{
-    borrow::BorrowMut, collections::HashMap, convert::Infallible, error::Error, net::SocketAddr, sync::{Arc, Mutex}
-};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr};
 
 use figment::{Figment, providers::{Format, Yaml, Env}};
 
 use serde::Deserialize;
 
-use serde_json::Value;
-use std::fs;
-
-use server::{controller::handle_http_connection, schema::{devices, environments, projects}, state::StateDelta};
+use server::{controller::handle_http_connection, schema::{devices, environments, projects}};
 use shared::request_operations::{CurrentStatusResponse, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
 use shared::state_operations::{StateOperationMessage, StateAction};
-
-
-// fn listen(websocket: &mut WebSocketStream<TcpStream>, message_queue) {
-//     match message_queue {
-//         Operation::RequestState => {
-//             websocket.send(Operation::RequestState.into()).expect("Could not request state");
-// 
-//             let remote_state = websocket.read().unwrap(); // bloqueo hasta que se reciba algo
-// 
-//             if !remote_state.is_binary() {
-//                 panic!("Invalid read!");
-//             }
-// 
-//             let message_data = remote_state.into_data();
-//             let remote_json: Value = serde_json::from_slice(message_data.as_slice()).expect("Could not deserialize");
-// 
-//             let local_state = fs::read("test.json").expect("Could not open local state");
-//             let local_json: Value = serde_json::from_slice(local_state.as_slice()).expect("Could not deserialize");
-// 
-//             let state_delta = StateDelta::from_json(local_json, remote_json);
-// 
-//             println!("Missing keys local: {:?}", state_delta.not_in_local); // Should push delete
-//                                                                             // transaction
-//             println!("Missing keys remote: {:?}", state_delta.not_in_remote); // Should push add
-//                                                                               // transaction
-//             println!("Keys with different values: {:?}", state_delta.value_not_equal);
-// 
-//             *current_state = Operation::ExecuteTransaction(Transaction::Update(state_delta.value_not_equal[0].to_string())); // Testing only
-// 
-//             sleep(Duration::from_secs(1));
-//         },
-//         Operation::ExecuteTransaction(transaction) => {
-//             websocket.send(Operation::ExecuteTransaction(transaction.clone()).into()).unwrap();
-//             *current_state = Operation::RequestState;
-//         },
-//     }
-// }
-// 
-// 
-// fn last_main() {
-//     env_logger::init();
-// 
-//     let config: Config = Figment::new()
-//         .merge(Yaml::file("config.yaml"))
-//         .join(Env::raw().only(&["PORT", "ADDRESS"]))
-//         .extract().unwrap();
-// 
-//     let address = config.address.unwrap_or("127.0.0.1".into());
-//     let port = config.port.unwrap_or("3000".into());
-//     
-//     let full_address = format!("{address}:{port}");
-//     println!("Listening at {full_address}");
-//     let server = TcpListener::bind(full_address).unwrap();
-// 
-//     for stream in server.incoming(){
-//         // Este move es para que el spawn (que hace uso de hebras)
-//         // sea dueño todo ese bloque (necesario por garantias de ciclo de vida)
-//         spawn(move || {
-//             let callback = |req: &Request, mut response: Response| { // esto es un lambda en Rust
-//                 println!("handshake");
-//                 println!("request path: {}", req.uri().path());
-// 
-//                 for (header, _value) in req.headers() {
-//                     println!("* {header}");
-//                 }
-// 
-//                 let headers = response.headers_mut();
-// 
-//                 headers.append("Authorization", "mi autorizacion".parse().unwrap());
-// 
-//                 Ok(response)
-//             };
-// 
-//             let mut websocket = accept_hdr(stream.unwrap(), callback).unwrap();
-// 
-//             let mut current_state = Operation::RequestState;
-// 
-//             loop {
-//                 listen(&mut websocket, &mut current_state);
-//             }
-//         });
-//     }
-// }
-
 
 #[derive(Deserialize)]
 struct Config {
@@ -115,9 +23,6 @@ struct Config {
     address: Option<String>,
     database_url: Option<String>,
 }
-
-type MessageQueue = Arc<Mutex<HashMap<String, String>>>;
-
 
 async fn listen_device(
     session: &mut ListenerSession,
@@ -231,14 +136,6 @@ async fn listen_device(
                 .await
                 .expect("Failed to send update request");
 
-//            let message_data = next_from_stream
-//                .into_text()
-//                .unwrap();
-//
-//            let status_request_reponse = 
-
-            // let remote_json: Value = serde_json::from_str(message_data.as_str()).expect("Could not deserialize");
-
             println!("{status_request_response:?}");
 
             sleep(Duration::from_millis(5000)).await;
@@ -282,88 +179,6 @@ async fn is_device_registered(machine_id: String, database_pool: Pool) -> bool {
 
     return !is_device_none
 }
-
-// async fn old_new_session(raw_stream: TcpStream, database_pool: Pool)->ListenerSession {
-//     let mut listener_type = ListenerType::Error;
-//     let mut machine_id: String = String::default();
-//     let mut bearer_token: String = String::default();
-// 
-//     let callback = |req: &Request, mut response: Response| {
-//         println!("request path: {}", req.uri().path());
-// 
-//         for (header, value) in req.headers() {
-//             println!("* {header}: {value:?}");
-//         }
-// 
-//         let auth_value = req.headers()
-//             .get("authorization");
-// 
-//         if auth_value.is_none() {
-//             *response.status_mut() = StatusCode::UNAUTHORIZED;
-//             return Ok(response);
-//         }
-// 
-//         bearer_token = auth_value
-//             .expect("Client didn't set a value to header 'machine-id'")
-//             .to_str()
-//             .expect("Error while retrieving header 'machine-id'")
-//             .to_string();
-// 
-//         machine_id = req.headers()
-//             .get("machine-id")
-//             .expect("Client didn't set a value to header 'machine-id'")
-//             .to_str()
-//             .expect("Error while retrieving header 'machine-id'")
-//             .to_string();
-// 
-//         let machine_type = req.headers()
-//             .get("machine-type")
-//             .expect("Client didn't set a value to header 'machine-type'")
-//             .to_str()
-//             .expect("Error while retrieving header 'machine-type'");
-// 
-//         match machine_type {
-//             "device" => {
-//                 listener_type = ListenerType::Device;
-//             },
-//             "cli" => {
-//                 listener_type = ListenerType::CLI;
-//             }
-//             _ => {
-//                 panic!("Invalid value for 'machine-type' ({machine_type})")
-//             }
-//         }
-// 
-//         println!("Listener type set to '{listener_type:?}'");
-// 
-//         Ok(response)
-//     };
-// 
-//     let ws_stream = accept_hdr_async(raw_stream, callback).await.expect("Error during handshake");
-// 
-//     ListenerSession {
-//         machine_id,
-//         listener_type,
-//         bearer_token,
-//         ws_stream,
-//     }
-// }
-
-// async fn old_new_session(req: Request, database_pool: Pool) -> ListenerSession {
-//     println!("Received a new, potentially ws handshake");
-//     println!("The request's path is: {}", req.uri().path());
-//     println!("The request's headers are:");
-//     for (ref header, _value) in req.headers() {
-//         println!("* {}", header);
-//     }
-// 
-//     ListenerSession {
-//         machine_id,
-//         listener_type,
-//         bearer_token,
-//         ws_stream,
-//     }
-// }
 
 fn is_http_connection(req: &mut Request<Incoming>) -> bool { 
     let upgrade = HeaderValue::from_static("Upgrade");
@@ -621,21 +436,18 @@ async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
     }
 }
 
-use server::models::*;
-use diesel::{insert_into, prelude::*, serialize::ToSql};
-use deadpool_diesel::{sqlite::{Manager, Pool, Runtime}, InteractError};
+use diesel::{insert_into, prelude::*};
+use deadpool_diesel::sqlite::{Manager, Pool, Runtime};
 use hyper::{
     body::Incoming, header::{
         HeaderValue, CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION,
         UPGRADE,
-    }, server::conn::http1, service::service_fn, upgrade::Upgraded, HeaderMap, Method, Request, Response, StatusCode, Version
+    }, server::conn::http1, service::service_fn, upgrade::Upgraded, Method, Request, Response, StatusCode, Version
 };
 
-use tokio_tungstenite::{
-    tungstenite::{
-        handshake::derive_accept_key,
-        protocol::{Message, Role},
-    },
+use tokio_tungstenite::tungstenite::{
+    handshake::derive_accept_key,
+    protocol::Role,
 };
 
 type Body = http_body_util::Full<hyper::body::Bytes>;
