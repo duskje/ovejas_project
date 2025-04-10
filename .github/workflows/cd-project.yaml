@@ -30,7 +30,7 @@ jobs:
 
       - name: Install project 
         working-directory: ./python_example_project
-        run: poetry install
+        run: poetry install --no-root
 
       - name: Run up
         working-directory: ./python_example_project
