@@ -105,7 +105,7 @@ async fn listen_device(
                         environment_update,
                     );
 
-                    return;
+                    continue;
                 }
 
                 let device_environment_hash = state_hashes
