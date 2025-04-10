@@ -109,9 +109,13 @@ fn process_environment_update_request(environment: String, environment_update: E
 
             let resources = local_state_json
                 .get("resources")
-                .expect("Target state doesn't have the key 'resources'")
+                .expect("Local state doesn't have the key 'resources'")
                 .as_array()
                 .unwrap();
+
+            if resources.len() == 0 {
+                return
+            }
 
             for resource in resources {
                 let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
@@ -121,7 +125,7 @@ fn process_environment_update_request(environment: String, environment_update: E
             }
 
             if !dry_run {
-                let mut target_state = serde_json::json!({ "version": 1 });
+                let mut target_state = serde_json::json!({ "version": 1, "resources": [] });
 
                 target_state["created_at"] = serde_json::Value::String(Utc::now().to_string());
 
