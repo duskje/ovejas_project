@@ -22,4 +22,4 @@ jobs:
 
       - name: Run up
         working-directory: ./python_example_project
-        run: ovejas up --env test-0
+        run: ovejas up --env test-env
