@@ -37,7 +37,7 @@ fn get_ovejas_root_dir() -> String {
 }
 
 fn process_environment_update_request(environment: String, environment_update: EnvironmentUpdate) {
-    let dry_run = true;
+    let dry_run = false;
 
     match environment_update.operation {
         EnvironmentUpdateOperation::Create => {
