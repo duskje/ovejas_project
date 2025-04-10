@@ -34,7 +34,9 @@ jobs:
 
       - name: Run up
         working-directory: ./python_example_project
-        run: ovejas up --env test-env
+        run: |
+          $(poetry env activate)
+          ovejas up --env test-env
         env:
           ADDRESS: ${{ secrets.ADDRESS }}
           CLI_TOKEN: ${{ secrets.CLI_TOKEN }}
