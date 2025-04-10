@@ -16,6 +16,7 @@ use serde::Deserialize;
 use server::{controller::handle_http_connection, schema::{devices, environments, projects}};
 use shared::request_operations::{CurrentStatusResponse, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
 use shared::state_operations::{StateOperationMessage, StateAction};
+use serde_json::json;
 
 #[derive(Deserialize)]
 struct Config {
@@ -92,6 +93,20 @@ async fn listen_device(
                 }).await;
 
                 let latest_state_json = latest_state.unwrap().unwrap().json;
+
+                if latest_state_json == "{}" {
+                    let environment_update = EnvironmentUpdate {
+                        state: None,
+                        operation: EnvironmentUpdateOperation::Destroy,
+                    };
+
+                    environments_to_update.insert(
+                        environment_name,
+                        environment_update,
+                    );
+
+                    return;
+                }
 
                 let device_environment_hash = state_hashes
                     .get(&environment_name);
@@ -428,7 +443,64 @@ async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
                     unimplemented!("action not implemented yet");
                 },
                 StateAction::Down => {
-                    unimplemented!("action not implemented yet");
+                    // Duplicated code
+                    let _ = conn.interact(move |conn| {
+                        let project_result = projects::table
+                            .filter(projects::name.eq(state_operation_message.project.clone()))
+                            .select(Projects::as_select())
+                            .get_result(conn)
+                            .optional()
+                            .unwrap();
+
+                        let project: Projects = match project_result {
+                            Some(project) => {
+                                println!("loaded project: {}", state_operation_message.project.clone());
+
+                                project
+                            },
+                            None => {
+                                println!("created project: {}", state_operation_message.project.clone());
+
+                                insert_into(projects::dsl::projects)
+                                    .values(projects::name.eq(state_operation_message.project.clone()))
+                                    .get_result(conn)
+                                    .unwrap()
+                            }
+                        };
+
+                        let environment_result: Option<Environments> = Environments::belonging_to(&project)
+                            .select(Environments::as_select())
+                            .filter(environments::name.eq(state_operation_message.environment.clone()))
+                            .get_result(conn)
+                            .optional()
+                            .unwrap();
+
+                        let environment: Environments = match environment_result {
+                            Some(environment) => {
+                                println!("loaded environment: {}", state_operation_message.environment.clone());
+
+                                environment
+                            },
+                            None => {
+                                println!("created project: {}", state_operation_message.environment.clone());
+
+                                insert_into(environments::dsl::environments)
+                                    .values((
+                                        environments::name.eq(state_operation_message.environment.clone()),
+                                        environments::project_id.eq(project.id),
+                                    ))
+                                    .get_result(conn)
+                                    .unwrap()
+                            }
+                        };
+
+                        insert_into(states::dsl::states)
+                            .values((
+                                states::json.eq("{}".to_string()),
+                                states::environment_id.eq(environment.id),
+                            ))
+                            .execute(conn).expect("Could not insert state");
+                        }).await;
                 }
             }
         },
