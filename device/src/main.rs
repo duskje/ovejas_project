@@ -58,7 +58,7 @@ fn process_environment_update_request(environment: String, environment_update: E
             }
 
             let ovejas_root_dir = get_ovejas_root_dir();
-            let state_file_path = format!("{ovejas_root_dir}/state.{environment}.json");
+            let state_file_path = format!("{ovejas_root_dir}/state/state.{environment}.json");
 
             if !dry_run {
                 fs::write(state_file_path, target_state.clone().as_str())
@@ -70,7 +70,7 @@ fn process_environment_update_request(environment: String, environment_update: E
             let target_state_json: serde_json::Value = serde_json::from_str(target_state.clone().as_str()).unwrap();
 
             let ovejas_root_dir = get_ovejas_root_dir();
-            let state_file_path = format!("{ovejas_root_dir}/state.{environment}.json");
+            let state_file_path = format!("{ovejas_root_dir}/state/state.{environment}.json");
 
             let local_state = fs::read_to_string(state_file_path.clone()).expect("Failed to read local state file");
             let local_state_json: serde_json::Value = serde_json::from_str(local_state.as_str()).unwrap();
@@ -102,7 +102,7 @@ fn process_environment_update_request(environment: String, environment_update: E
         },
         EnvironmentUpdateOperation::Destroy => {
             let ovejas_root_dir = get_ovejas_root_dir();
-            let state_file_path = format!("{ovejas_root_dir}/state.{environment}.json");
+            let state_file_path = format!("{ovejas_root_dir}/state/state.{environment}.json");
 
             let local_state = fs::read_to_string(state_file_path.clone()).expect("Failed to read local state file");
             let local_state_json: serde_json::Value = serde_json::from_str(local_state.as_str()).unwrap();
