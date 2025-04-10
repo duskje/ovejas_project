@@ -20,16 +20,16 @@ use tungstenite::error::Error;
 
 use uuid::Uuid;
 
-fn init_conn(full_addr: String) -> (WebSocket<MaybeTlsStream<TcpStream>>, Response) {
+fn init_conn(full_addr: String, cli_token: String) -> (WebSocket<MaybeTlsStream<TcpStream>>, Response) {
     let request = Request::builder()
         .uri(format!("ws://{full_addr}/socket"))
         .header("sec-websocket-key", "foo")
         .header("machine-type", "cli")
-        .header("machine-id", "cli-test")
+        .header("machine-id", "cli")
         .header("upgrade", "websocket")
         .header("host", "example.com")
         .header("connection", "upgrade")
-        .header("authorization", "Bearer")
+        .header("authorization", cli_token)
         .header("sec-websocket-version", 13)
         .body(())
         .unwrap();
@@ -54,7 +54,6 @@ fn init_conn(full_addr: String) -> (WebSocket<MaybeTlsStream<TcpStream>>, Respon
 
 struct ProjectMetadata {
     project_name: String,
-    target_state: String,
 }
 
 #[derive(Debug)]
@@ -67,9 +66,6 @@ enum ProjectError {
 fn get_project_metadata() -> Result<ProjectMetadata, ProjectError> {
     let project_root_dir = find_project_root()
         .ok_or(ProjectError::NotFoundError(String::from("Could not find project root.")))?;
-
-    let target_state = python_executor(project_root_dir.clone())
-        .map_err( |err| ProjectError::PythonExecutorError(err.to_string() ))?;
 
     let mut pyproject_file = File::open(format!("{project_root_dir}/pyproject.toml"))
         .expect("Could not find pyproject.toml in project");
@@ -92,8 +88,17 @@ fn get_project_metadata() -> Result<ProjectMetadata, ProjectError> {
 
     Ok(ProjectMetadata {
         project_name,
-        target_state,
     })
+}
+
+fn get_target_state() -> Result<String, ProjectError> {
+    let project_root_dir = find_project_root()
+        .ok_or(ProjectError::NotFoundError(String::from("Could not find project root.")))?;
+
+    let target_state = python_executor(project_root_dir.clone())
+        .map_err( |err| ProjectError::PythonExecutorError(err.to_string() ))?;
+
+    Ok(target_state)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -106,6 +111,7 @@ struct ServerResponse {
 struct Config {
     port: Option<u64>,
     address: Option<String>,
+    cli_token: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -214,37 +220,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config: Config = Figment::new()
         .merge(Yaml::file("config.yml"))
-        .join(Env::raw().only(&["PORT", "ADDRESS"]))
+        .join(Env::raw().only(&["PORT", "ADDRESS", "CLI_TOKEN"]))
         .extract().unwrap();
 
     let address = config.address.unwrap_or("127.0.0.1".into());
     let port = config.port.unwrap_or(9734u64.into());
+    let cli_token = config.cli_token.expect("no cli_token");
 
     let full_addr = format!("{address}:{port}");
 
     match matches.subcommand() {
         Some(("up", matches)) => {
-            let project_metadata = get_project_metadata().unwrap();
-
-            let (mut websocket, response) = init_conn(full_addr);
+            let (mut websocket, response) = init_conn(full_addr, cli_token);
             let environment = matches.get_one::<String>("env").expect("Expected environment");
+
+            let project_metadata = get_project_metadata().unwrap();
+            let target_state = get_target_state().unwrap();
 
             let state_operation = StateOperationMessage {
                 environment: environment.to_string(),
                 action: StateAction::Up,
-                state: Some(project_metadata.target_state),
+                state: Some(target_state),
                 project: project_metadata.project_name,
             };
+
+            println!("target state pushed to remote");
 
             let _ = websocket.send(state_operation.into());
 
             websocket.send(Message::Close(Option::None)).unwrap();
         },
         Some(("preview", matches)) => {
-            let project_metadata = get_project_metadata().unwrap();
-
-            let (mut websocket, response) = init_conn(full_addr);
+            let (mut websocket, response) = init_conn(full_addr, cli_token);
             let environment = matches.get_one::<String>("env").expect("Expected environment");
+
+            let project_metadata = get_project_metadata().unwrap();
+            let target_state = get_target_state().unwrap();
 
             let state_operation = StateOperationMessage {
                 environment: environment.to_string(),
@@ -255,20 +266,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             let _ = websocket.send(state_operation.into());
 
-            println!("{}", project_metadata.target_state);
+            println!("{}", target_state);
 
             websocket.send(Message::Close(Option::None)).unwrap();
         },
         Some(("down", matches)) => {
-            let project_metadata = get_project_metadata().unwrap();
-
-            let (mut websocket, response) = init_conn(full_addr);
+            let (mut websocket, response) = init_conn(full_addr, cli_token);
             let environment = matches.get_one::<String>("env").expect("Expected environment");
+
+            let project_metadata = get_project_metadata().unwrap();
+            let target_state = get_target_state().unwrap();
 
             let state_operation = StateOperationMessage {
                 environment: environment.to_string(),
                 action: StateAction::Down,
-                state: Some(project_metadata.target_state),
+                state: Some(target_state),
                 project: project_metadata.project_name,
             };
             
@@ -295,7 +307,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let response = client.post(format!("http://{full_addr}/device"))
                         .json(&device_create_dto)
-                        .header("machine-type", "cli").send().unwrap();
+                        .header("machine-type", "cli")
+                        .header("Authorization", cli_token).send().unwrap();
 
                     println!("{:?}", response.json::<ServerResponse>());
                 },
@@ -310,10 +323,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let response = client.delete(format!("http://{full_addr}/device"))
                         .json(&device_delete_dto)
-                        .header("machine-type", "cli").send().unwrap();
+                        .header("machine-type", "cli")
+                        .header("Authorization", cli_token).send().unwrap();
 
                     println!("{:?}", response.json::<ServerResponse>());
-                
+
                 },
                 _ => unreachable!("Clap should ensure we don't get here"),
             }
@@ -339,7 +353,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let response = client.post(format!("http://{full_addr}/enroll_device"))
                         .json(&device_create_dto)
-                        .header("machine-type", "cli").send().unwrap();
+                        .header("machine-type", "cli")
+                        .header("Authorization", cli_token).send().unwrap();
 
                     println!("{:?}", response.json::<ServerResponse>());
                 },
@@ -362,7 +377,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let response = client.post(format!("http://{full_addr}/user"))
                         .json(&device_create_dto)
-                        .header("machine-type", "cli").send().unwrap();
+                        .header("machine-type", "cli")
+                        .header("Authorization", cli_token).send().unwrap();
 
                     println!("{:?}", response.json::<ServerResponse>());
                 },
@@ -377,7 +393,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let response = client.delete(format!("http://{full_addr}/user"))
                         .json(&device_delete_dto)
-                        .header("machine-type", "cli").send().unwrap();
+                        .header("machine-type", "cli")
+                        .header("Authorization", cli_token).send().unwrap();
 
                     println!("{:?}", response.json::<ServerResponse>());
                 
