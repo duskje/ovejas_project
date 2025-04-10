@@ -1,4 +1,4 @@
-name: Build server
+name: Run deploy
 
 on: 
   push:
@@ -6,7 +6,7 @@ on:
     paths: python_example_project
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
