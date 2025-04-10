@@ -121,7 +121,12 @@ fn process_environment_update_request(environment: String, environment_update: E
             }
 
             if !dry_run {
-                fs::remove_file(state_file_path.clone()).expect("Failed to remove state file");
+                let mut target_state = serde_json::json!({ "version": 1 });
+
+                target_state["created_at"] = serde_json::Value::String(Utc::now().to_string());
+
+                fs::write(state_file_path, target_state.to_string())
+                    .expect(format!("Failed to write statefile({ovejas_root_dir})").as_str());
             }
         },
     }
