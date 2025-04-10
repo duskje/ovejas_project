@@ -3,7 +3,7 @@ name: Run deploy
 on: 
   push:
     branches: main
-    paths: python_example_project
+    paths: 'python_example_project/**'
 
 jobs:
   deploy:
@@ -20,6 +20,15 @@ jobs:
         working-directory: ./cli
         run: cargo install --path .
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' 
+
+      - name: Poetry install 
+        run: poetry install
+
       - name: Run up
         working-directory: ./python_example_project
         run: ovejas up --env test-env
+
