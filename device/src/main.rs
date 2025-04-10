@@ -128,7 +128,8 @@ fn process_environment_update_request(environment: String, environment_update: E
 }
 
 fn get_state_hashes() -> HashMap<String, [u8; 16]> {
-    let state_dir = get_ovejas_root_dir();
+    let ovejas_root_dir = get_ovejas_root_dir();
+    let state_dir = format!("{ovejas_root_dir}/state/");
 
     let mut state_hashes = HashMap::new();
 
