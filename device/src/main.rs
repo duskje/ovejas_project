@@ -137,7 +137,7 @@ fn get_state_hashes() -> HashMap<String, [u8; 16]> {
         let dir_result = dir.unwrap();
 
         let file_name: &str = dir_result.path().file_name().unwrap().to_str().unwrap();
-        let captures = Regex::new(r"^state.([A-Za-z]+).json$").unwrap().captures(file_name);
+        let captures = Regex::new(r"^state.(.*).json$").unwrap().captures(file_name);
 
         match captures {
             Some(captures) => {
