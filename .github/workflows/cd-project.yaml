@@ -29,9 +29,13 @@ jobs:
         uses: snok/install-poetry@v1
 
       - name: Install project 
+        working-directory: ./python_example_project
         run: poetry install
 
       - name: Run up
         working-directory: ./python_example_project
         run: ovejas up --env test-env
+        env:
+          ADDRESS: ${{ secrets.ADDRESS }}
+          CLI_TOKEN: ${{ secrets.CLI_TOKEN }}
 
