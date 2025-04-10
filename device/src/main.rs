@@ -7,6 +7,7 @@ use device::state::StateDelta;
 use figment::{Figment, providers::{Format, Yaml, Env}};
 use http::{Request, Response};
 use md5::{Md5, Digest};
+use tungstenite::handshake::machine;
 use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
 use walkdir::WalkDir;
 use std::env::home_dir;
@@ -341,6 +342,8 @@ impl Resource {
 struct Config {
     port: Option<u64>,
     address: Option<String>,
+    machine_id: Option<String>,
+    device_token: Option<String>,
 }
 
 #[derive(Debug)]
@@ -355,13 +358,27 @@ struct ServerResponse {
 }
 
 fn main() {
+    let ovejas_root_dir = get_ovejas_root_dir();
+
+    if !Path::new(ovejas_root_dir.as_str()).exists() {
+        fs::create_dir(ovejas_root_dir.clone()).expect("Failed to create state dir");
+    }
+
     let config: Config = Figment::new()
-        .merge(Yaml::file("config.yaml"))
-        .join(Env::raw().only(&["PORT", "ADDRESS", "DATABASE_PATH"]))
+        .merge(Yaml::file(format!("{}/config.yaml", ovejas_root_dir.clone())))
+        .join(Env::raw().only(&["PORT", "ADDRESS", "DATABASE_PATH", "MACHINE_ID", "DEVICE_TOKEN"]))
         .extract().unwrap();
 
     let address = config.address.unwrap_or("localhost".into());
     let port = config.port.unwrap_or(9734u64.into());
+    let machine_id = config.machine_id.expect("machine_id not set");
+    let device_token = config.device_token.expect("device_token not set");
+
+    let state_dir = format!("{ovejas_root_dir}/state");
+
+    if !Path::new(state_dir.as_str()).exists() {
+        fs::create_dir(state_dir).expect("Failed to create state dir");
+    }
 
     tracing_subscriber::fmt::init();
 
@@ -374,21 +391,11 @@ fn main() {
         .header("host", address)
         .header("connection", "upgrade")
         .header("machine-type", "device")
-        .header("machine-id", "place-holder-machine-id")
-        .header("authorization", "device_token")
+        .header("machine-id", machine_id)
+        .header("authorization", device_token)
         .header("sec-websocket-version", 13)
         .body(())
         .unwrap();
-
-    let home = home_dir().unwrap();
-
-    let state_dir = format!("{}/{OVEJAS_DIR}", home.to_string_lossy());
-
-    use std::path::Path;
-
-    if !Path::new(state_dir.as_str()).exists() {
-        fs::create_dir(state_dir).expect("Failed to create state dir");
-    }
 
     let (mut websocket, response) = connect(request).map_err(|e: tungstenite::Error| {
         match e {
