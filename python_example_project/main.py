@@ -1,7 +1,4 @@
-from ovejas.system import User, Group
-from ovejas.docker import Image
 from ovejas.registry import ResourceRegistry
-from ovejas.curl import Curl
+from ovejas.system import User
 
-for i in range(10):
-    user = User(f'user_{i}', name=f"user_{i}", uid=4000 + i)
+User(f"ci-user", name=f"ci-user", uid=3998)
