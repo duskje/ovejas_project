@@ -18,3 +18,5 @@ diesel = { version = "2.2.0", features = ["sqlite", "returning_clauses_for_sqlit
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 reqwest = { version = "0.12.12", features = ["json", "blocking"] }
 uuid = "1.16.0"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
