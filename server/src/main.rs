@@ -7,7 +7,7 @@ use tokio::{
 
 use tokio_tungstenite::WebSocketStream;
 
-use std::{collections::HashMap, convert::Infallible, net::SocketAddr};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr, str::FromStr};
 
 use figment::{Figment, providers::{Format, Yaml, Env}};
 
@@ -17,6 +17,9 @@ use server::{controller::handle_http_connection, schema::{devices, environments,
 use shared::request_operations::{CurrentStatusResponse, EnvironmentUpdate, EnvironmentUpdateOperation, RequestOperations};
 use shared::state_operations::{StateOperationMessage, StateAction};
 use serde_json::json;
+
+use tracing::{info, debug, error, instrument};
+use tracing_subscriber;
 
 #[derive(Deserialize)]
 struct Config {
@@ -186,11 +189,10 @@ async fn is_device_registered(machine_id: String, database_pool: Pool) -> bool {
             .optional()
             .expect("Database error");
 
-        println!("device {device:?}");
         return device.is_none();
     }).await.expect("Could not fetch device from database");
 
-    println!("is_none {is_device_none}");
+    info!(device_registered = !is_device_none);
 
     return !is_device_none
 }
@@ -259,13 +261,12 @@ fn error_response_json(message: &str, status_code: StatusCode) -> Response<http_
 }
 
 async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool: Pool) -> Result<Response<Body>, Infallible> {
-    println!("Received a new, potentially ws handshake");
-    println!("The request's path is: {}", req.uri().path());
-    println!("The request's headers are:");
+    info!("New incoming request");
 
-    for (ref header, _value) in req.headers() {
-        println!("* {}", header);
-    }
+    info!(
+        path = req.uri().path(),
+        headers = format!("{:#?}", req.headers()),
+    );
 
     let upgrade = HeaderValue::from_static("Upgrade");
     let websocket = HeaderValue::from_static("websocket");
@@ -321,8 +322,12 @@ async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool
     };
 
     if is_http_connection(&mut req) {
+        info!(protocol = "HTTP");
         return Ok(handle_http_connection(&mut req, database_pool).await);
     }
+
+    info!(protocol = "WebSocket");
+    debug!("Spawning a new thread...");
 
     tokio::task::spawn(async move {
         match hyper::upgrade::on(&mut req).await {
@@ -356,6 +361,7 @@ async fn new_session(mut req: Request<Incoming>, addr: SocketAddr, database_pool
 async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
     match session.listener_type {
         ListenerType::Device => {
+            debug!("Listening to device");
             let mut current_state = RequestOperations::StatusRequest;
 
             loop {
@@ -431,6 +437,13 @@ async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
                             }
                         };
 
+                        info!(
+                            opeartion = "up",
+                            environment = environment.name,
+                            project = project.name,
+                            state = state_operation_message.state,
+                        );
+
                         insert_into(states::dsl::states)
                             .values((
                                 states::json.eq(state_operation_message.state.expect("Expected a JSON").clone()),
@@ -494,6 +507,13 @@ async fn handle_connection(mut session: ListenerSession, database_pool: Pool) {
                             }
                         };
 
+                        info!(
+                            opeartion = "up",
+                            environment = environment.name,
+                            project = project.name,
+                            state = "",
+                        );
+
                         insert_into(states::dsl::states)
                             .values((
                                 states::json.eq("{}".to_string()),
@@ -528,7 +548,13 @@ use hyper_util::rt::TokioIo;
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    let format = tracing_subscriber::fmt::format()
+        .pretty()
+        .with_source_location(false);
+
+    tracing_subscriber::fmt()
+        .event_format(format)
+        .init();
 
     let config: Config = Figment::new()
         .merge(Yaml::file("config.yml"))
@@ -547,7 +573,7 @@ async fn main() {
 
     let full_address = format!("{address}:{port}");
 
-    println!("Listening at {full_address}");
+    info!("Listening at {full_address}");
 
     let try_socket = TcpListener::bind(full_address).await;
     let listener = try_socket.expect("Failed to bind");
@@ -562,7 +588,7 @@ async fn main() {
             let conn = http1::Builder::new().serve_connection(io, service).with_upgrades();
 
             if let Err(err) = conn.await {
-                eprintln!("failed to serve connection: {err:?}");
+                error!("failed to serve connection: {err:?}");
             }
         });
     }

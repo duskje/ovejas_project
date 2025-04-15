@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::fs::create_dir;
 use std::ops::Deref;
+use std::thread;
+use std::time::Duration;
 use std::{fs, net::TcpStream};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use device::state::StateDelta;
+use device::state::{self, StateDelta};
 use figment::{Figment, providers::{Format, Yaml, Env}};
 use http::{Request, Response};
 use md5::{Md5, Digest};
@@ -54,7 +56,7 @@ fn process_environment_update_request(environment: String, environment_update: E
                 let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
                 resource.create(dry_run);
 
-                println!("res {resource:?}");
+                debug!(created_resource = serde_json::to_string_pretty(&resource).unwrap());
             }
 
             let ovejas_root_dir = get_ovejas_root_dir();
@@ -80,19 +82,25 @@ fn process_environment_update_request(environment: String, environment_update: E
                 target_state_json.as_object().unwrap()["resources"].clone(),
             );
 
-            for resource in delta.resources_to_update {
-                let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
-                resource.update(dry_run);
-            }
-
             for resource in delta.resources_to_delete {
                 let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
                 resource.delete(dry_run);
+
+                debug!(deleted_resource = serde_json::to_string_pretty(&resource).unwrap());
+            }
+
+            for resource in delta.resources_to_update {
+                let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
+                resource.update(dry_run);
+
+                debug!(updated_resource = serde_json::to_string_pretty(&resource).unwrap());
             }
 
             for resource in delta.resources_to_create {
                 let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
                 resource.create(dry_run);
+
+                debug!(created_resource = serde_json::to_string_pretty(&resource).unwrap());
             }
 
             if !dry_run {
@@ -121,7 +129,7 @@ fn process_environment_update_request(environment: String, environment_update: E
                 let resource: Resource = serde_json::from_value(resource.clone()).unwrap();
                 resource.delete(dry_run);
 
-                println!("res {resource:?}");
+                debug!(deleted_resource = serde_json::to_string_pretty(&resource).unwrap());
             }
 
             if !dry_run {
@@ -171,7 +179,7 @@ fn get_state_hashes() -> HashMap<String, [u8; 16]> {
     state_hashes
 }
 
-use tracing::{info, instrument};
+use tracing::{info, debug, instrument};
 use tracing_subscriber;
 
 fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<(), Box<dyn std::error::Error>> {
@@ -189,6 +197,8 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<(), Box<d
 
             let state_hashes = get_state_hashes();
 
+            info!(local_state_hashes = format!("{:?}", state_hashes.clone()));
+
             let current_status = CurrentStatusResponse {
                 status: DeviceStatus::Idle,
                 timestamp: Utc::now().naive_utc().to_string(),
@@ -199,10 +209,12 @@ fn listen(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<(), Box<d
                 .expect("Could not send device status to remote");
         },
         RequestOperations::UpdateEnvironmentsRequest(environment_updates) => {
+            info!("Remote requested to update current state");
+
             for (environment, environment_update) in environment_updates {
-                info!(
+                debug!(
                     environment = environment.clone(),
-                    state = environment_update.clone().state,
+                    state = serde_json::to_string_pretty(&environment_update.clone().state.unwrap()).unwrap(),
                 );
 
                 process_environment_update_request(
@@ -251,7 +263,11 @@ impl ResourceProvider for User {
             .output()
             .expect("Failed to execute process");
 
-        println!("{result:?}");
+        debug!(
+            status_code = result.status.code(),
+            stdout = String::from_utf8(result.stdout).unwrap(),
+            stderr = String::from_utf8(result.stderr).unwrap(),
+        );
     }
     
     fn update(&self) {
@@ -265,7 +281,11 @@ impl ResourceProvider for User {
             .output()
             .expect("Failed to execute process");
 
-        println!("{result:?}");
+        debug!(
+            status_code = result.status.code(),
+            stdout = String::from_utf8(result.stdout).unwrap(),
+            stderr = String::from_utf8(result.stderr).unwrap(),
+        );
     }
 
     fn delete(&self) {
@@ -274,7 +294,11 @@ impl ResourceProvider for User {
             .output()
             .expect("Failed to execute process");
 
-        println!("{result:?}");
+        debug!(
+            status_code = result.status.code(),
+            stdout = String::from_utf8(result.stdout).unwrap(),
+            stderr = String::from_utf8(result.stderr).unwrap(),
+        );
     }
 }
 
@@ -298,27 +322,6 @@ impl Resource {
         Box::new(provider)
     }
     
-//    fn execute(&self, action: Action, dry_run: bool) -> SerdeJsonResult<()> {
-//        let urn_split: Vec<&str> = self.urn.split("::").collect();
-//        let [provider_module, kind, resource_id] = urn_split.try_into()
-//            .expect("Invalid urn");
-//
-//        let resource = match kind {
-//            "User" => serde_json::from_value::<User>(self.parameters.clone())?,
-//            _ => panic!["resource does not exist"],
-//        };
-//        
-//        if !dry_run {
-//            match action {
-//                Action::Create => resource.create(),
-//                Action::Delete => resource.delete(),
-//                Action::Update => resource.update(),
-//            };
-//        }
-//
-//        Ok(())
-//    }
-
     fn create(&self, dry_run: bool) {
         if dry_run {
             return;
@@ -431,7 +434,8 @@ fn main() {
         match listen(&mut websocket) {
             Ok(_) => {},
             Err(err) => {
-                println!("{err:?}");
+                info!("Disconnected (Reason: {err}). Attempting to open connection...");
+                thread::sleep(Duration::from_millis(5000));
             }
         };
     }
