@@ -67,6 +67,7 @@ En el directorio `device/` es necesario ejecutar:
 ```bash
 diesel generate run
 cargo build
+sudo -E ./target/debug/device
 ```
 
 ## Infraestructura (infra/)
