@@ -3,3 +3,4 @@ server/*.db
 server/config.yml
 server/*.pem
 infra/vars.auto.tfvars
+infra/.terraform
